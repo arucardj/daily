@@ -1,7 +1,7 @@
 name: 每日股票分析+飞书推送
 
 on:
-  workflow_dispatch:  # 允许手动点一下运行
+  workflow_dispatch:  # 允许手动触发测试
   schedule:
     - cron: '30 7 * * *'  # 每天北京时间15:30自动运行
 
@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 设置Python
+      - name: 设置Python环境
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
@@ -21,8 +21,8 @@ jobs:
           pip install -r requirements.txt
           pip install requests
 
-      - name: 运行分析并推送到飞书
+      - name: 发送消息到飞书
         env:
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
         run: |
-          python app.py
+          python send_to_feishu.py
