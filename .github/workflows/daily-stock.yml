@@ -1,0 +1,28 @@
+name: 每日股票分析+飞书推送
+
+on:
+  workflow_dispatch:  # 允许手动点一下运行
+  schedule:
+    - cron: '30 7 * * *'  # 每天北京时间15:30自动运行
+
+jobs:
+  run-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 设置Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: 安装依赖
+        run: |
+          pip install -r requirements.txt
+          pip install requests
+
+      - name: 运行分析并推送到飞书
+        env:
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+        run: |
+          python app.py
