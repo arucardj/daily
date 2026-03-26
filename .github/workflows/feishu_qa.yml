@@ -1,0 +1,59 @@
+name: 飞书股票问答机器人
+
+on:
+  workflow_dispatch:
+    inputs:
+      stock_code:
+        description: '要分析的股票代码（如 600519）'
+        required: true
+        default: '600519'
+        type: string
+
+jobs:
+  answer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 设置 Python 环境
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 安装依赖
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install requests
+
+      - name: 执行单只股票分析并推送飞书
+        env:
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+          # 你可以按需加上 AI 配置，让分析更智能
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          STOCK_CODE="${{ github.event.inputs.stock_code }}"
+          echo "🔍 正在分析股票：$STOCK_CODE"
+
+          # 调用项目分析逻辑，生成结果
+          python -c "
+          import sys
+          sys.path.append('.')
+          from analyzer import StockAnalyzer  # 假设你项目里有这个类，按需修改
+          analyzer = StockAnalyzer()
+          result = analyzer.analyze_single_stock('$STOCK_CODE')
+          
+          # 发送到飞书
+          import requests
+          webhook = '$FEISHU_WEBHOOK_URL'
+          msg = {
+              'msg_type': 'text',
+              'content': {'text': f'📊 股票分析结果（{STOCK_CODE}）：\\n{result}'}
+          }
+          requests.post(webhook, json=msg)
+          print('✅ 飞书推送完成')
+          "
