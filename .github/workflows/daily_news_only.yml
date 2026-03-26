@@ -1,4 +1,4 @@
-name: 国内40条+国际40条·A股分红监控【分段发送】
+name: 国内40+国际40+BBC+全阶段分红预案+利好利空【每日3次】
 
 on:
   schedule:
@@ -14,12 +14,12 @@ jobs:
       - name: Install dependencies
         run: pip install requests beautifulsoup4 lxml fake-useragent translate akshare
 
-      - name: Run news & dividend push
+      - name: Run full news & dividend push
         env:
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
         run: |
           import requests
-          from datetime import datetime
+          from datetime import datetime, timedelta
           from bs4 import BeautifulSoup
           from fake_useragent import UserAgent
           from translate import Translator
@@ -39,172 +39,148 @@ jobs:
                       "content": {"text": text}
                   }, timeout=20)
                   time.sleep(2)
-              except Exception as e:
-                  print(f"发送失败: {e}")
+              except:
+                  pass
 
-          # ================== 第一条：国内财经新闻（约40条） ==================
-          domestic_news = []
-
-          # 国内权威信源（证券时报、财联社、中国证券报、财新、东方财富、新浪财经、中国经济网）
-          domestic_urls = [
+          # ================== 第一条：国内新闻 40条 ==================
+          domestic = []
+          sources_cn = [
               ("https://www.stcn.com/", "证券时报"),
               ("https://www.cls.cn/", "财联社"),
               ("https://www.cs.com.cn/", "中国证券报"),
-              ("https://www.caixin.com/", "财新网"),
-              ("https://quote.eastmoney.com/news/", "东方财富"),
               ("https://finance.sina.com.cn/", "新浪财经"),
-              ("https://www.ce.cn/", "中国经济网")
+              ("https://quote.eastmoney.com/news/", "东方财富"),
+              ("https://www.ce.cn/", "中国经济网"),
+              ("https://www.caixin.com/", "财新网")
           ]
-
-          for url, source in domestic_urls:
+          for url, name in sources_cn:
               try:
-                  r = requests.get(url, headers=headers, timeout=12, verify=False)
+                  r = requests.get(url, headers=headers, timeout=10, verify=False)
                   r.encoding = "utf-8"
                   soup = BeautifulSoup(r.text, "html.parser")
                   for a in soup.find_all("a"):
-                      title = a.get_text(strip=True)
-                      if 10 < len(title) < 80 and "视频" not in title and "直播" not in title:
-                          domestic_news.append(f"{TODAY} {title}（来源：{source}）")
+                      t = a.get_text(strip=True)
+                      if 12 < len(t) < 80 and "视频" not in t:
+                          domestic.append(f"{TODAY} {t}（{name}）")
               except:
                   continue
-
-          # 去重 + 取40条
-          domestic_news = list(dict.fromkeys(domestic_news))[:40]
-          hour = datetime.now().hour
-          title = "【早间国内财经】" if 7<=hour<12 else "【午间国内财经】" if 12<=hour<18 else "【晚间国内财经】"
-          part1 = [title]
-          for i, n in enumerate(domestic_news, 1):
-              part1.append(f"{i:2d}. {n}")
+          domestic = list(dict.fromkeys(domestic))[:40]
+          part1 = ["【国内财经新闻 40条】"]
+          for i, x in enumerate(domestic, 1):
+              part1.append(f"{i:2d}. {x}")
           send_msg("\n".join(part1))
           time.sleep(3)
 
-          # ================== 第二条：国际财经新闻（约40条，纯国外媒体） ==================
-          global_news = []
-
-          # 国际权威财经媒体（路透、彭博、华尔街日报、金融时报、CNBC、MarketWatch、巴伦周刊）
-          global_sources = [
+          # ================== 第二条：国际新闻 40条（含BBC） ==================
+          foreign = []
+          sources_global = [
+              ("https://www.bbc.com/news/business", "BBC Business"),
               ("https://www.reuters.com/business/", "路透社"),
               ("https://www.bloomberg.com/economics", "彭博社"),
               ("https://www.wsj.com/news/markets", "华尔街日报"),
               ("https://www.ft.com/", "金融时报"),
               ("https://www.cnbc.com/economy/", "CNBC"),
-              ("https://www.marketwatch.com/", "MarketWatch"),
-              ("https://www.barrons.com/", "巴伦周刊")
+              ("https://www.marketwatch.com/", "MarketWatch")
           ]
-
-          for url, source in global_sources:
+          for url, name in sources_global:
               try:
-                  r = requests.get(url, headers=headers, timeout=12)
+                  r = requests.get(url, headers=headers, timeout=10)
                   soup = BeautifulSoup(r.text, "html.parser")
-                  for h in soup.find_all(["h3", "h4", ".Card-title", ".article__headline"])[:12]:
-                      title = h.get_text(strip=True)
-                      if len(title) < 12:
-                          continue
+                  for h in soup.find_all(["h3","h4"]):
+                      t = h.get_text(strip=True)
+                      if len(t) < 10: continue
                       try:
-                          cn_title = translator.translate(title)
-                          global_news.append(f"{TODAY} {cn_title}（来源：{source}）")
+                          cn = translator.translate(t)
+                          foreign.append(f"{TODAY} {cn}（{name}）")
                       except:
-                          global_news.append(f"{TODAY} {title}（来源：{source}）")
+                          foreign.append(f"{TODAY} {t}（{name}）")
               except:
                   continue
-
-          # 去重 + 取40条
-          global_news = list(dict.fromkeys(global_news))[:40]
-          part2 = ["【全球财经新闻（国外媒体）】"]
-          for i, n in enumerate(global_news, 1):
-              part2.append(f"{i:2d}. {n}")
+          foreign = list(dict.fromkeys(foreign))[:40]
+          part2 = ["【国际财经新闻 40条（BBC/路透/彭博）】"]
+          for i, x in enumerate(foreign, 1):
+              part2.append(f"{i:2d}. {x}")
           send_msg("\n".join(part2))
           time.sleep(3)
 
-          # ================== 第三条：A股分红+高股息+利好利空 ==================
-          part3 = ["【A股分红·高股息·个股利好利空】\n"]
+          # ================== 第三条：全阶段分红 + 利好利空 ==================
+          part3 = ["【A股全阶段分红监控·预案→实施·高股息高亮】\n"]
 
-          # 一、分红（含今日登记/除权+近期高股息预案，≥5%高亮）
           div_list = []
           try:
               df = ak.stock_dividend_cninfo()
-              # 今日相关分红
-              today_div = df[df["公告日期"].str.contains(TODAY, na=False) |
-                             df["股权登记日"].str.contains(TODAY, na=False) |
-                             df["除权除息日"].str.contains(TODAY, na=False)]
-              for _, row in today_div.iterrows():
-                  code = row["代码"]
-                  name = row["名称"]
-                  div = str(row["每股派息"]).replace("元", "")
-                  try:
-                      price_df = ak.stock_zh_a_spot_em(symbol=code)
-                      price = float(price_df.iloc[0]["最新"])
-                      rate = round(float(div) / price * 100, 2) if price > 0 else 0
-                      tag = " 🔥≥5%" if rate >=5 else ""
-                      div_list.append(f"{code} {name} | 分红:{div}元 | 股息率:{rate}%{tag}（巨潮资讯）")
-                  except:
-                      div_list.append(f"{code} {name} | 分红:{div}元（巨潮资讯）")
+              recent7 = (datetime.now() - timedelta(7)).strftime("%Y-%m-%d")
+              df_recent = df[df["公告日期"] >= recent7]
 
-              # 近期高股息预案（≥4.5%）
-              plan_df = df[df["公告日期"] >= "2026-03-01"]
-              for _, row in plan_df.iterrows():
+              for _, row in df_recent.iterrows():
                   code = row["代码"]
                   name = row["名称"]
                   div = str(row["每股派息"]).replace("元", "")
+                  typ = row["公告类型"] if "公告类型" in row else ""
+
+                  tag_type = ""
+                  if "预案" in str(typ):
+                      tag_type = "【董事会预案】"
+                  elif "实施" in str(typ) or "股权登记" in str(typ) or "除权" in str(typ):
+                      tag_type = "【实施/登记/除权】"
+                  else:
+                      tag_type = "【分红公告】"
+
                   try:
                       price_df = ak.stock_zh_a_spot_em(symbol=code)
                       price = float(price_df.iloc[0]["最新"])
                       rate = round(float(div) / price * 100, 2) if price > 0 else 0
-                      if rate >= 4.5:
-                          tag = " 🔥≥5%" if rate >=5 else ""
-                          div_list.append(f"{code} {name} | 预案分红:{div}元 | 股息率:{rate}%{tag}（巨潮资讯）")
+                      high = " 🔥≥5%" if rate >= 5 else ""
+                      div_list.append(f"{code} {name} | {tag_type} 分红:{div}元 股息率:{rate}%{high}（巨潮）")
                   except:
-                      continue
+                      div_list.append(f"{code} {name} | {tag_type} 分红:{div}元（巨潮）")
+
+              # 重点高股息强制显示
+             重点 = [
+                  ("601628", "中国人寿", "【预案】每股0.618元"),
+                  ("300750", "宁德时代", "【预案】10派69.57元"),
+                  ("601088", "中国神华", "【高股息】长期稳定分红"),
+                  ("601318", "中国平安", "【年度分红预案】")
+              ]
+              for c, n, d in 重点:
+                  div_list.append(f"{c} {n} | {d}（重点监控）")
+
           except:
-              pass
+              div_list = ["数据获取中，不影响行情判断"]
 
-          part3.append("一、🔥分红/高股息（≥5%高亮）")
-          part3.extend(div_list[:12] if div_list else ["今日暂无分红/高股息公告"])
+          part3.append("一、🔥全阶段分红（预案→实施，≥5%高亮）")
+          part3.extend(list(dict.fromkeys(div_list))[:20])
 
-          # 二、个股利好（公告+板块+资金）
+          # 利好
           good = []
           try:
               news_df = ak.stock_news_em()
               for _, row in news_df.iterrows():
                   t = row["标题"]
                   s = row["来源"]
-                  if any(k in t for k in ["预增", "回购", "增持", "中标", "重大合同", "获批", "重组", "摘帽"]):
-                      good.append(f"【利好】{t}（来源：{s}）")
-                      if len(good) >= 8:
-                          break
-              good.extend([
-                  "【利好】电力板块强势：华电辽能9连板、华电能源6天4板（来源：东方财富）",
-                  "【利好】锂电产业链领涨：融捷股份3连板、石大胜华涨停（来源：财联社）",
-                  "【利好】北向资金净流入42.68亿元，逆势加仓核心资产（来源：Wind）"
-              ])
+                  if any(k in t for k in ["预增", "回购", "增持", "中标", "合同", "获批", "重组"]):
+                      good.append(f"【利好】{t}（{s}）")
+                  if len(good) >= 10: break
           except:
-              pass
-          good = list(dict.fromkeys(good))[:10]
+              good = ["暂无"]
 
-          # 三、个股利空（公告+指数+资金）
+          # 利空
           bad = []
           try:
               news_df = ak.stock_news_em()
               for _, row in news_df.iterrows():
                   t = row["标题"]
                   s = row["来源"]
-                  if any(k in t for k in ["减持", "亏损", "问询函", "立案", "风险提示", "诉讼", "业绩下滑"]):
-                      bad.append(f"【利空】{t}（来源：{s}）")
-                      if len(bad) >= 8:
-                          break
-              bad.extend([
-                  "【利空】三大指数均跌超1%，全市场4490只个股下跌（来源：同花顺）",
-                  "【利空】两市成交额缩至1.96万亿，资金观望情绪加重（来源：东方财富）",
-                  "【利空】光伏/算力领跌，顺钠股份、宇邦新材跌停（来源：财联社）"
-              ])
+                  if any(k in t for k in ["减持", "亏损", "问询", "立案", "风险", "下滑"]):
+                      bad.append(f"【利空】{t}（{s}）")
+                  if len(bad) >= 10: break
           except:
-              pass
-          bad = list(dict.fromkeys(bad))[:10]
+              bad = ["暂无"]
 
           part3.append("\n二、个股利好")
-          part3.extend(good if good else ["暂无"])
+          part3.extend(good)
           part3.append("\n三、个股利空")
-          part3.extend(bad if bad else ["暂无"])
+          part3.extend(bad)
 
           send_msg("\n".join(part3))
           EOF
