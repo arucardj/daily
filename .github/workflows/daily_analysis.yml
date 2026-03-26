@@ -520,43 +520,89 @@ jobs:
             TODAY_FILE=$(date +%Y%m%d)
             NEWS_CONTENT=$(cat news/global_financial_news_$TODAY_FILE.txt)
             
-            # 推送新闻到飞书（markdown格式，更易读）
+            # 推送新闻到飞书（纯文本，自动拆分）
             if [ -n "$FEISHU_WEBHOOK_URL" ]; then
-              # 转换为飞书markdown格式
-              MARKDOWN_CONTENT=$(echo "$NEWS_CONTENT" | sed 's/=== /### /g' | sed 's/🔑 /**🔑**/g' | sed 's/=/---/g')
-              curl -X POST $FEISHU_WEBHOOK_URL \
-                -H "Content-Type: application/json" \
-                -d '{
-                  "msg_type": "markdown",
-                  "content": {
-                    "title": "【每日核心财经新闻】影响股市/民生",
-                    "text": "'"$MARKDOWN_CONTENT"'"
-                  }
-                }'
+              NEWS_LENGTH=${#NEWS_CONTENT}
+              if [ $NEWS_LENGTH -gt 2000 ]; then
+                NEWS_PART1=$(echo "$NEWS_CONTENT" | head -10)
+                curl -X POST $FEISHU_WEBHOOK_URL \
+                  -H "Content-Type: application/json" \
+                  -d '{
+                    "msg_type": "text",
+                    "content": {
+                      "text": "📰【每日核心财经新闻（上）】\n\n'"$NEWS_PART1"'"
+                    }
+                  }'
+                sleep 2
+                NEWS_PART2=$(echo "$NEWS_CONTENT" | tail -n +11)
+                curl -X POST $FEISHU_WEBHOOK_URL \
+                  -H "Content-Type: application/json" \
+                  -d '{
+                    "msg_type": "text",
+                    "content": {
+                      "text": "📰【每日核心财经新闻（下）】\n\n'"$NEWS_PART2"'"
+                    }
+                  }'
+              else
+                curl -X POST $FEISHU_WEBHOOK_URL \
+                  -H "Content-Type: application/json" \
+                  -d '{
+                    "msg_type": "text",
+                    "content": {
+                      "text": "📰【每日核心财经新闻】影响股市/民生\n\n'"$NEWS_CONTENT"'"
+                    }
+                  }'
+              fi
               echo "✅ 实时财经新闻已推送到飞书"
             fi
           else
             python main.py $FORCE_RUN_ARG
             
-            # 执行完成后，推送【影响股市/民生】的实时新闻到飞书
+            # 拆分推送：大盘 + 个股 + 新闻（解决字数截断）
             if [ "$NEWS_ENABLED" = "true" ] && [ -n "$FEISHU_WEBHOOK_URL" ]; then
               TODAY_FILE=$(date +%Y%m%d)
               NEWS_CONTENT=$(cat news/global_financial_news_$TODAY_FILE.txt)
               
-              # 转换为飞书markdown格式，更美观
-              MARKDOWN_CONTENT=$(echo "$NEWS_CONTENT" | sed 's/=== /### /g' | sed 's/🔑 /**🔑**/g' | sed 's/=/---/g')
+              # 1. 大盘复盘
+              if [ -f "reports/report_$TODAY_FILE.md" ]; then
+                MARKET_REVIEW=$(sed -n '/大盘复盘/,/自选股分析/p' reports/report_$TODAY_FILE.md 2>/dev/null | head -200)
+                if [ -n "$MARKET_REVIEW" ]; then
+                  curl -X POST $FEISHU_WEBHOOK_URL \
+                    -H "Content-Type: application/json" \
+                    -d '{
+                      "msg_type": "text",
+                      "content": {
+                        "text": "📊【大盘复盘】\n\n'"$MARKET_REVIEW"'"
+                      }
+                    }'
+                  sleep 2
+                fi
+                
+                # 2. 自选股分析
+                STOCK_ANALYSIS=$(sed -n '/自选股分析/,$p' reports/report_$TODAY_FILE.md 2>/dev/null | head -300)
+                if [ -n "$STOCK_ANALYSIS" ]; then
+                  curl -X POST $FEISHU_WEBHOOK_URL \
+                    -H "Content-Type: application/json" \
+                    -d '{
+                      "msg_type": "text",
+                      "content": {
+                        "text": "📈【自选股分析 601012 / 000636】\n\n'"$STOCK_ANALYSIS"'"
+                      }
+                    }'
+                  sleep 2
+                fi
+              fi
               
-              # 推送新闻补充报告
+              # 3. 实时新闻
               curl -X POST $FEISHU_WEBHOOK_URL \
                 -H "Content-Type: application/json" \
                 -d '{
-                  "msg_type": "markdown",
+                  "msg_type": "text",
                   "content": {
-                    "title": "【每日核心财经新闻】影响股市/民生",
-                    "text": "'"$MARKDOWN_CONTENT"'"
+                    "text": "📰【实时财经新闻】影响股市&民生\n\n'"$NEWS_CONTENT"'"
                   }
                 }'
-              echo "✅ 【影响股市/民生】的实时财经新闻已推送到飞书"
+              echo "✅ 全部内容已拆分推送完成"
             fi
           fi
       
@@ -585,7 +631,7 @@ jobs:
             echo "⚠️ 未生成报告文件"
           fi
           echo ""
-          if [ -d "news" ] && [ "$(ls -A news 2>/dev/null)" ]; then
+          if [ -d "news" ] && [ "$(ls -A news" 2>/dev/null)" ]; then
             echo "生成的实时新闻文件:"
             ls -la news/
             echo ""
