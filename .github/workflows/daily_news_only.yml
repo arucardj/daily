@@ -1,5 +1,4 @@
-name: 【全球财经新闻】中英双语+自动翻译+来源标注
-
+name: 全球财经+分红扫描+个股利好利空 分段防截断推送
 on:
   schedule:
     - cron: '10 0 * * 1-5'
@@ -11,15 +10,15 @@ jobs:
   send_news:
     runs-on: ubuntu-latest
     steps:
-      - name: 安装依赖
+      - name: 安装依赖包
         run: |
-          pip install requests beautifulsoup4 lxml fake-useragent translate
-
-      - name: 抓取并推送全球新闻（自动翻译）
+          pip install requests beautifulsoup4 lxml fake-useragent translate akshare
+          
+      - name: 执行分段推送脚本
         env:
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
         run: |
-          cat > global_news.py << 'EOF'
+          cat >< 'EOF'
           import requests
           import random
           from datetime import datetime
@@ -29,141 +28,238 @@ jobs:
           import warnings
           warnings.filterwarnings("ignore")
 
+          # 基础配置
           WEBHOOK_URL = "${{ secrets.FEISHU_WEBHOOK_URL }}"
           TODAY = datetime.now().strftime("%Y-%m-%d")
-          MAX_NEWS = 45
-
           translator = Translator(to_lang="zh")
 
+          # 请求头设置
           def get_headers():
               try:
                   return {"User-Agent": UserAgent().random}
               except:
-                  return {"User-Agent": "Mozilla/5.0"}
+                  return {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
-          # 国内新闻
-          def fetch_sina():
-              news = []
+          # 国内新浪财经新闻抓取
+          def fetch_sina_news():
+              news_list = []
               urls = [
                   "https://finance.sina.com.cn/world/",
-                  "https://finance.sina.com.cn/macro/"
+                  "https://finance.sina.com.cn/macro/",
+                  "https://finance.sina.com.cn/money/forex/forexnews.shtml"
               ]
-              for u in urls:
+              for url in urls:
                   try:
-                      r = requests.get(u, headers=get_headers(), timeout=15, verify=False)
-                      r.encoding = "utf-8"
-                      soup = BeautifulSoup(r.text, "lxml")
+                      res = requests.get(url, headers=get_headers(), timeout=15, verify=False)
+                      res.encoding = "utf-8"
+                      soup = BeautifulSoup(res.text, "lxml")
                       for a in soup.find_all("a"):
-                          t = a.get_text(strip=True)
-                          if 12 < len(t) < 80 and "视频" not in t and "直播" not in t:
-                              if any(k in t for k in ["美联储", "美股", "原油", "黄金", "汇率", "CPI", "央行"]):
-                                  news.append(f"{TODAY} {t}")
-                  except:
+                          title = a.get_text(strip=True)
+                          if< len(title< 80 and "视频" not in title and "直播" not in title:
+                              if any(key in title for key in ["美联储", "美股", "原油", "黄金", "汇率", "CPI", "央行", "PMI"]):
+                                  news_list.append(f"{TODAY} {title}")
+                  except Exception:
                       continue
-              return list(set(news))
+              return list(set(news_list))[:12]
 
-          # 路透社
+          # 路透社新闻抓取+翻译
           def fetch_reuters():
-              res = []
+              res_list = []
               try:
-                  r = requests.get("https://www.reuters.com/business/", headers=get_headers(), timeout=15)
-                  soup = BeautifulSoup(r.text, "lxml")
-                  for art in soup.select("article h3")[:25]:
-                      t = art.get_text(strip=True)
-                      if len(t) < 15: continue
+                  res = requests.get("https://www.reuters.com/business/", headers=get_headers(), timeout=15)
+                  soup = BeautifulSoup(res.text, "lxml")
+                  for item in soup.select("article h3")[:8]:
+                      title = item.get_text(strip=True)
+                      if len(title) < 15:
+                          continue
                       try:
-                          cn = translator.translate(t)
-                          res.append(f"{TODAY} {cn}（引自路透社）")
-                      except:
-                          res.append(f"{TODAY} {t}（引自路透社）")
-              except:
+                          cn_title = translator.translate(title)
+                          res_list.append(f"{TODAY} {cn_title}（引自路透社）")
+                      except Exception:
+                          res_list.append(f"{TODAY} {title}（引自路透社）")
+              except Exception:
                   pass
-              return res
+              return res_list
 
-          # CNBC
+          # CNBC新闻抓取+翻译
           def fetch_cnbc():
-              res = []
+              res_list = []
               try:
-                  r = requests.get("https://www.cnbc.com/economy/", headers=get_headers(), timeout=15)
-                  soup = BeautifulSoup(r.text, "lxml")
-                  for h in soup.select(".Card-title")[:25]:
-                      t = h.get_text(strip=True)
-                      if len(t) < 15: continue
+                  res = requests.get("https://www.cnbc.com/economy/", headers=get_headers(), timeout=15)
+                  soup = BeautifulSoup(res.text, "lxml")
+                  for item in soup.select(".Card-title")[:8]:
+                      title = item.get_text(strip=True)
+                      if len(title)< 15:
+                          continue
                       try:
-                          cn = translator.translate(t)
-                          res.append(f"{TODAY} {cn}（引自CNBC）")
-                      except:
-                          res.append(f"{TODAY} {t}（引自CNBC）")
-              except:
+                          cn_title = translator.translate(title)
+                          res_list.append(f"{TODAY} {cn_title}（引自CNBC）")
+                      except Exception:
+                          res_list.append(f"{TODAY} {title}（引自CNBC）")
+              except Exception:
                   pass
-              return res
+              return res_list
 
-          # 彭博
+          # 彭博社新闻抓取+翻译
           def fetch_bloomberg():
-              res = []
+              res_list = []
               try:
-                  r = requests.get("https://www.bloomberg.com/economics", headers=get_headers(), timeout=15)
-                  soup = BeautifulSoup(r.text, "lxml")
-                  for a in soup.select("a[href*='news'] h3")[:25]:
-                      t = a.get_text(strip=True)
-                      if len(t) < 15: continue
+                  res = requests.get("https://www.bloomberg.com/economics", headers=get_headers(), timeout=15)
+                  soup = BeautifulSoup(res.text, "lxml")
+                  for item in soup.select("a[href*='news'] h3")[:8]:
+                      title = item.get_text(strip=True)
+                     < 15:
+                          continue
                       try:
-                          cn = translator.translate(t)
-                          res.append(f"{TODAY} {cn}（引自彭博社）")
-                      except:
-                          res.append(f"{TODAY} {t}（引自彭博社）")
-              except:
+                          cn_title = translator.translate(title)
+                          res_list.append(f"{TODAY} {cn_title}（引自彭博社）")
+                      except Exception:
+                          res_list.append(f"{TODAY} {title}（引自彭博社）")
+              except Exception:
                   pass
-              return res
+              return res_list
 
-          def main():
-              # 抓取
-              news = fetch_sina() + fetch_reuters() + fetch_cnbc() + fetch_bloomberg()
-              news = list(dict.fromkeys(news))[:MAX_NEWS]
-
-              # 兜底
-              if len(news) < 35:
-                  fall = [
-                      f"{TODAY} 美联储官员释放信号，市场降息预期再度变化（综合外媒）",
-                      f"{TODAY} 美股震荡，科技股与周期股表现分化（综合外媒）",
-                      f"{TODAY} 国际原油价格受地缘局势影响出现波动（综合外媒）",
-                      f"{TODAY} 美元指数强弱转换，全球资金流向出现变化（综合外媒）",
-                      f"{TODAY} 黄金避险需求反复，价格区间震荡（综合外媒）",
-                      f"{TODAY} 美国经济数据表现不一，市场解读存在分歧（综合外媒）",
-                      f"{TODAY} 全球供应链局部紧张，部分商品价格抬升（综合外媒）",
-                      f"{TODAY} 中东局势影响能源供给预期，原油溢价走高（综合外媒）",
-                      f"{TODAY} 全球央行政策出现分化，流动性环境复杂（综合外媒）",
-                      f"{TODAY} 全球通胀压力仍存，各国政策应对谨慎（综合外媒）"
-                  ]
-                  news += fall[:35-len(news)]
-                  news = news[:MAX_NEWS]
-
-              # 排序输出
-              news = [f"{i+1}. {line}" for i, line in enumerate(news)]
-              text = "\n".join(news)
-
+          # 拼接第一段内容：全球财经要闻
+          def build_part1():
+              global_news = fetch_sina_news() + fetch_reuters() + fetch_cnbc() + fetch_bloomberg()
+              global_news = list(dict.fromkeys(global_news))[:25]
+              
+              # 时段标题
               hour = datetime.now().hour
-              if 7 <= hour < 12:
-                  title = "【早间全球财经新闻】"
-              elif 12 <= hour < 18:
-                  title = "【午间全球财经新闻】"
+              if 7< 12:
+                  title = "【第一部分｜早间全球财经要闻】"
+              elif 12< 18:
+                  title = "【第一部分｜午间全球财经要闻】"
               else:
-                  title = "【晚间全球财经新闻】"
+                  title = "【第一部分｜晚间全球财经要闻】"
+              
+              content = [title]
+              for idx, news in enumerate(global_news, 1):
+                  content.append(f"{idx}. {news}")
+              return "\n".join(content)
 
-              content = f"{title}\n\n{text}\n\n📊 本次共 {len(news)} 条"
-
-              # 推送
+          # 发送第一段消息
+          def send_part1():
+              content = build_part1()
               try:
                   requests.post(WEBHOOK_URL, json={
                       "msg_type": "text",
                       "content": {"text": content}
                   }, timeout=20)
-                  print("✅ 推送成功")
-              except:
-                  print("❌ 推送失败")
+                  print("✅ 第一部分推送成功")
+              except Exception as e:
+                  print("❌ 第一部分推送失败")
 
           if __name__ == "__main__":
-              main()
+              send_part1()
           EOF
+          
+          # 运行第一段脚本
+          python push_part1.py
+          
+          
+          # --------------- 第二段：分红扫描+个股利好利空 ---------------
+          cat > push_part2.py << 'EOF'
+          import requests
+          import akshare as ak
+          from datetime import datetime
+          import warnings
+          warnings.filterwarnings("ignore")
 
-          python global_news.py
+          WEBHOOK_URL = "${{ secrets.FEISHU_WEBHOOK_URL }}"
+          TODAY = datetime.now().strftime("%Y-%m-%d")
+
+          # A股高股息分红筛选（≥5%高亮）
+          def get_dividend_info():
+              dividend_list = []
+              try:
+                  df = ak.stock_dividend_cninfo()
+                  df = df[df["公告日期"].str.contains(TODAY, na=False)]
+                  if df.empty:
+                      return ["✅ 今日暂无最新分红公告（来源：巨潮资讯）"]
+                  
+                  for _, row in df.iterrows():
+                      code = row["代码"]
+                      name = row["名称"]
+                      dividend_per_share = str(row["每股派息"]).replace("元", "")
+                      try:
+                          # 获取实时股价计算股息率
+                          price_df = ak.stock_zh_a_spot_em(symbol=code)
+                          price = float(price_df["最新"].iloc[0])
+                          dividend_rate = round(float(dividend_per_share) / price * 100, 2)
+                          high_tag = " 🔥高股息≥5%" if dividend_rate >= 5 else ""
+                          info = f"{code} {name} | 每股分红：{dividend_per_share}元 | 股息率：{dividend_rate}%{high_tag}（来源：巨潮资讯）"
+                      except Exception:
+                          info = f"{code} {name} | 每股分红：{dividend_per_share}元（来源：巨潮资讯）"
+                      dividend_list.append(info)
+              except Exception:
+                  dividend_list = ["⚠️ 分红数据获取异常（来源：巨潮资讯）"]
+              return dividend_list[:10]
+
+          # 个股利好利空抓取
+          def get_stock_sentiment():
+              good_news = []
+              bad_news = []
+              try:
+                  news_df = ak.stock_news_em()
+                  for _, row in news_df.iterrows():
+                      title = row["标题"]
+                      source = row["来源"]
+                      full_news = f"{title}（来源：{source}）"
+                      
+                      # 利好判断
+                      good_keys = ["预增", "回购", "增持", "中标", "重大合同", "政策利好", "业绩大增", "获批"]
+                      if any(key in title for key in good_keys) and len(g< 8:
+                          good_news.append(f"【利好】{full_news}")
+                      
+                      # 利空判断
+                      bad_keys = ["减持", "亏损", "问询函", "风险提示", "诉讼", "业绩下滑", "立案"]
+                      if any(key in title for key in bad_keys) and len(b< 8:
+                          bad_news.append(f"【利空】{full_news}")
+              except Exception:
+                  good_news = ["暂无新增利好公告"]
+                  bad_news = ["暂无新增利空公告"]
+              return good_news, bad_news
+
+          # 拼接第二段内容
+          def build_part2():
+              dividend = get_dividend_info()
+              good, bad = get_stock_sentiment()
+              
+              hour = datetime.now().hour<=< 12:
+                  title = "【第二部分｜A股分红+个股利好利空】"
+<=< 18:
+                  title = "【第二部分｜A股分红+个股利好利空】"
+              else:
+                  title = "【第二部分｜A股分红+个股利好利空】"
+              
+              content = [title]
+              content.append("\n一、🔥A股最新分红公告（股息率≥5%高亮）")
+              content.extend(dividend)
+              
+              content.append("\n二、个股利好公告")
+              content.extend(good)
+              
+              content.append("\n三、个股利空公告")
+              content.extend(bad)
+              
+              return "\n".join(content)
+
+          # 发送第二段消息
+          def send_part2():
+              content = build_part2()
+              try:
+                  requests.post(WEBHOOK_URL, json={
+                      "msg_type": "text",
+                      "content": {"text": content}
+                  }, timeout=20)
+                  print("✅ 第二部分推送成功")
+              except Exception as e:
+                  print("❌ 第二部分推送失败")
+
+          if __name__ == "__main__":
+              send_part2()
+          EOF
+          
+          # 运行第二段脚本
+          python push_part2.py
