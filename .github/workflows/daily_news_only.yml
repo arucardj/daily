@@ -1,4 +1,4 @@
-name: 【精准版】国内40+国际40·3月分红公告(≥4%)·新闻摘要【官方来源】
+name: 国内40+国际40·当月分红≥4%·新闻完整清晰【全自动】
 
 on:
   schedule:
@@ -14,13 +14,13 @@ jobs:
       - name: 安装依赖
         run: pip install requests beautifulsoup4 lxml fake-useragent translate akshare pandas
 
-      - name: 执行精准推送
+      - name: 执行推送
         env:
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
         run: |
           python3 -u << 'EOF'
           import requests, time, akshare as ak, pandas as pd
-          from datetime import datetime, timedelta
+          from datetime import datetime
           from bs4 import BeautifulSoup
           from fake_useragent import UserAgent
           from translate import Translator
@@ -37,7 +37,7 @@ jobs:
               except Exception as e:
                   print(f"发送失败: {e}")
 
-          # ================== 1. 国内新闻（40条，完整标题+来源） ==================
+          # ================== 1. 国内新闻 40条（完整标题+清晰易懂+来源） ==================
           def get_domestic_news():
               news = []
               sources = [
@@ -56,11 +56,11 @@ jobs:
                           title = a.get_text(strip=True)
                           if 15 < len(title) < 80 and "视频" not in title and "直播" not in title:
                               news.append(f"【{src}】{title}")
-                  except Exception as e:
+                  except:
                       continue
               return list(dict.fromkeys(news))[:40]
 
-          # ================== 2. 国际新闻（40条，翻译+完整标题+来源） ==================
+          # ================== 2. 国际新闻 40条（翻译+完整+来源：BBC/路透/彭博） ==================
           def get_global_news():
               news = []
               sources = [
@@ -74,7 +74,7 @@ jobs:
                   try:
                       r = requests.get(url, headers=headers, timeout=12)
                       soup = BeautifulSoup(r.text, "html.parser")
-                      for h in soup.find_all(["h3","h4",".Card-title",".article__headline"])[:15]:
+                      for h in soup.find_all(["h3","h4",".Card-title"]):
                           title = h.get_text(strip=True)
                           if len(title) < 12:
                               continue
@@ -83,72 +83,64 @@ jobs:
                               news.append(f"【{name}】{cn_title}")
                           except:
                               news.append(f"【{name}】{title}")
-                  except Exception as e:
+                  except:
                       continue
               return list(dict.fromkeys(news))[:40]
 
-          # ================== 3. 3月分红公告（≥4%，官方来源，精确计算） ==================
-          def get_official_dividend():
+          # ================== 3. 当月分红（自动：3月→3.1，4月→4.1，≥4%，降序，官方来源） ==================
+          def get_monthly_dividend():
               div_list = []
               try:
-                  # 1. 从巨潮资讯获取3月1日至今的分红公告
+                  today = datetime.now()
+                  start_date = datetime(today.year, today.month, 1)
                   df = ak.stock_dividend_cninfo()
                   df["公告日期"] = pd.to_datetime(df["公告日期"], errors="coerce")
-                  start_date = datetime(2026, 3, 1)
-                  df_march = df[df["公告日期"] >= start_date]
+                  df_month = df[df["公告日期"] >= start_date]
 
-                  # 2. 获取实时股价
-                  spot_df = ak.stock_zh_a_spot_em()
-                  spot_df = spot_df.set_index("代码")
+                  spot_df = ak.stock_zh_a_spot_em().set_index("代码")
 
-                  # 3. 计算股息率（每股派息 / 当前股价 * 100）
-                  for _, row in df_march.iterrows():
+                  for _, row in df_month.iterrows():
                       code = row["代码"]
                       name = row["名称"]
-                      div_per_share = pd.to_numeric(row["每股派息"], errors="coerce")
-                      if pd.isna(div_per_share) or div_per_share <= 0:
+                      div = pd.to_numeric(row["每股派息"], errors="coerce")
+                      if pd.isna(div) or div <= 0:
                           continue
-                      # 匹配实时股价
                       if code not in spot_df.index:
                           continue
                       price = spot_df.loc[code, "最新"]
                       if price <= 0:
                           continue
-                      dividend_rate = round((div_per_share / price) * 100, 2)
-                      if dividend_rate >= 4.0:
-                          tag = " 🔥≥5%" if dividend_rate >= 5 else ""
+                      rate = round((div / price) * 100, 2)
+                      if rate >= 4.0:
+                          tag = " 🔥≥5%" if rate >= 5 else ""
                           div_list.append({
                               "code": code,
                               "name": name,
-                              "rate": dividend_rate,
-                              "text": f"{code} {name} | 每股分红:{div_per_share}元 | 股息率:{dividend_rate}%{tag}（来源：巨潮资讯）"
+                              "rate": rate,
+                              "text": f"{code} {name} | 分红:{div}元 | 股息率:{rate}%{tag}（巨潮资讯）"
                           })
 
-                  # 4. 去重 + 按股息率从高到低排序
                   div_list = list({item["code"]: item for item in div_list}.values())
                   div_list.sort(key=lambda x: x["rate"], reverse=True)
-
-              except Exception as e:
-                  print(f"分红数据异常: {e}")
+              except:
+                  pass
               return div_list[:20]
 
-          # ================== 主执行逻辑 ==================
+          # ================== 主程序 ==================
           if __name__ == "__main__":
-              # 第一段：国内新闻
               domestic = get_domestic_news()
-              send_msg("【第一部分：国内财经新闻 40条】\n" + "\n".join([f"{i}. {n}" for i, n in enumerate(domestic, 1)]))
+              send_msg("【国内财经新闻 40条】\n" + "\n".join([f"{i}. {n}" for i, n in enumerate(domestic, 1)]))
 
-              # 第二段：国际新闻
               global_news = get_global_news()
-              send_msg("【第二部分：国际财经新闻 40条（BBC/路透/彭博）】\n" + "\n".join([f"{i}. {n}" for i, n in enumerate(global_news, 1)]))
+              send_msg("【国际财经新闻 40条（BBC/路透/彭博）】\n" + "\n".join([f"{i}. {n}" for i, n in enumerate(global_news, 1)]))
 
-              # 第三段：3月分红公告（≥4%）
-              div_data = get_official_dividend()
-              part3 = ["【第三部分：3月正式分红公告（≥4%，按股息率降序）】\n一、🔥高股息榜单（来源：巨潮资讯）"]
+              div_data = get_monthly_dividend()
+              month_str = datetime.now().strftime("%Y年%m月")
+              part3 = [f"【{month_str} 高股息分红公告（≥4%）】"]
               if div_data:
                   for i, item in enumerate(div_data, 1):
                       part3.append(f"{i}. {item['text']}")
               else:
-                  part3.append("暂无3月正式分红公告（股息率≥4%）")
+                  part3.append("暂无符合条件的分红公告")
               send_msg("\n".join(part3))
           EOF
