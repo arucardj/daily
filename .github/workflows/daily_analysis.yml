@@ -16,10 +16,9 @@ on:
         default: 'full'
         type: choice
         options:
-          - full          # 完整分析（股票+大盘+新闻）
-          - market-only   # 仅大盘复盘+新闻
-          - stocks-only   # 仅股票分析+新闻
-          - news-only     # 仅国际财经新闻
+          - full          # 完整分析（股票+大盘）
+          - market-only   # 仅大盘复盘
+          - stocks-only   # 仅股票分析
       force_run:
         description: '强制运行（跳过交易日检查）'
         required: false
@@ -50,257 +49,16 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
       
-      - name: 安装依赖（新增新闻抓取依赖）
+      - name: 安装依赖
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          # 安装新闻抓取所需依赖
-          pip install requests beautifulsoup4 lxml python-dotenv fake-useragent
       
       - name: 创建必要目录
         run: |
-          mkdir -p data logs reports news
+          mkdir -p data logs reports
       
-      - name: 创建【真正实时】新闻抓取脚本
-        run: |
-          cat > news_crawler.py << 'EOF'
-          #!/usr/bin/env python3
-          # -*- coding: utf-8 -*-
-          """
-          实时国际财经新闻抓取脚本 - 每天获取15条【影响股市/民生】的重要新闻
-          核心特点：
-          1. 多源抓取（新浪财经、东方财富、财新网），确保内容新鲜
-          2. 精准筛选（政策/通胀/利率/能源/消费/就业等影响股市的关键词）
-          3. 去重+排序（优先推送高权重新闻）
-          4. 100%每日不同，无重复模板
-          """
-          import requests
-          import json
-          import time
-          import random
-          from datetime import datetime
-          from bs4 import BeautifulSoup
-          from fake_useragent import UserAgent
-
-          # 全局配置
-          TODAY = datetime.now().strftime("%Y-%m-%d")
-          # 影响股市/民生的核心关键词（精准筛选）
-          KEYWORDS = [
-              # 宏观政策
-              "美联储", "央行", "降息", "加息", "利率", "货币政策", "财政政策",
-              # 经济数据
-              "GDP", "CPI", "PPI", "通胀", "失业率", "非农", "PMI", "进出口",
-              # 能源/大宗商品
-              "原油", "黄金", "铜价", "天然气", "煤炭", "大宗商品",
-              # 股市相关
-              "美股", "港股", "A股", "中概股", "IPO", "退市", "解禁", "北向资金",
-              # 国际局势
-              "中美贸易", "地缘政治", "汇率", "美元", "人民币",
-              # 民生/消费
-              "房价", "消费", "零售", "油价", "电价", "粮价", "就业"
-          ]
-
-          def get_random_headers():
-              """生成随机请求头，避免被反爬"""
-              try:
-                  ua = UserAgent()
-                  headers = {
-                      'User-Agent': ua.random,
-                      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-                      'Accept-Encoding': 'gzip, deflate, br',
-                      'Cache-Control': 'no-cache',
-                      'Connection': 'keep-alive',
-                      'Upgrade-Insecure-Requests': '1'
-                  }
-              except:
-                  # 备用UA
-                  headers = {
-                      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0',
-                      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
-                  }
-              return headers
-
-          def fetch_sina_finance_news():
-              """抓取新浪财经-国际新闻（核心来源）"""
-              news_list = []
-              try:
-                  urls = [
-                      "https://finance.sina.com.cn/world/",  # 国际财经
-                      "https://finance.sina.com.cn/money/forex/forexnews.shtml",  # 外汇
-                      "https://finance.sina.com.cn/future//"  # 大宗商品
-                  ]
-                  
-                  for url in urls:
-                      try:
-                          response = requests.get(
-                              url, 
-                              headers=get_random_headers(), 
-                              timeout=20,
-                              verify=False  # 跳过SSL验证，提高成功率
-                          )
-                          response.encoding = 'utf-8'
-                          soup = BeautifulSoup(response.text, 'lxml')
-                          
-                          # 不同页面的新闻选择器
-                          selectors = ['.news-item', '.blk_12', '.list_009 li', '.item']
-                          for selector in selectors:
-                              items = soup.select(selector)[:20]
-                              for item in items:
-                                  try:
-                                      # 提取标题和时间
-                                      title_tag = item.select_one('a')
-                                      if not title_tag:
-                                          continue
-                                      
-                                      title = title_tag.get_text(strip=True)
-                                      link = title_tag.get('href', '')
-                                      
-                                      # 过滤短标题/无意义标题
-                                      if len(title) < 12 or '视频' in title or '直播' in title:
-                                          continue
-                                      
-                                      # 筛选核心关键词新闻
-                                      if any(kw in title for kw in KEYWORDS):
-                                          # 补充时间，确保唯一性
-                                          news = f"{TODAY} {title}"
-                                          if news not in news_list:
-                                              news_list.append(news)
-                                      
-                                  except Exception as e:
-                                      continue
-                              
-                          # 随机延迟，避免被封
-                          time.sleep(random.uniform(1, 3))
-                          
-                      except Exception as e:
-                          continue
-                          
-              except Exception as e:
-                  print(f"新浪财经抓取失败: {e}")
-              return news_list
-
-          def fetch_eastmoney_news():
-              """抓取东方财富网-全球市场（备用来源）"""
-              news_list = []
-              try:
-                  url = "https://quote.eastmoney.com/globalindex/"
-                  response = requests.get(
-                      url, 
-                      headers=get_random_headers(), 
-                      timeout=20,
-                      verify=False
-                  )
-                  response.encoding = 'utf-8'
-                  soup = BeautifulSoup(response.text, 'lxml')
-                  
-                  # 提取全球市场新闻
-                  items = soup.select('.newsflash-item')[:15]
-                  for item in items:
-                      try:
-                          title = item.get_text(strip=True)
-                          if len(title) > 12 and any(kw in title for kw in KEYWORDS):
-                              news = f"{TODAY} {title}"
-                              if news not in news_list:
-                                  news_list.append(news)
-                      except:
-                          continue
-                          
-              except Exception as e:
-                  print(f"东方财富抓取失败: {e}")
-              return news_list
-
-          def filter_and_sort_news(all_news):
-              """
-              新闻去重+排序：
-              1. 去重
-              2. 优先推送含高权重关键词的新闻
-              3. 控制数量在10-20条
-              """
-              # 去重
-              unique_news = list(dict.fromkeys(all_news))
-              
-              # 高权重关键词（影响股市更直接）
-              HIGH_WEIGHT_KEYWORDS = ["美联储", "加息", "降息", "CPI", "非农", "原油", "美股", "人民币", "通胀"]
-              
-              # 排序：高权重关键词在前，其余在后
-              high_weight_news = []
-              normal_news = []
-              
-              for news in unique_news:
-                  if any(kw in news for kw in HIGH_WEIGHT_KEYWORDS):
-                      high_weight_news.append(news)
-                  else:
-                      normal_news.append(news)
-              
-              # 合并：高权重 + 普通，控制总数15条
-              final_news = high_weight_news[:10] + normal_news[:5]
-              
-              # 确保最少10条
-              if len(final_news) < 10:
-                  # 补充当日实时热点（绝对不会重复）
-                  fallback_news = [
-                      f"{TODAY} 央行公开市场操作：净投放/回笼资金{random.randint(100, 5000)}亿元",
-                      f"{TODAY} 国家统计局：{random.choice(['1-2月', '2月'])}{random.choice(['社会消费品零售总额', '固定资产投资'])}同比{random.choice(['增长', '下降'])}{random.uniform(0.1, 10.0):.1f}%",
-                      f"{TODAY} 国际油价{random.choice(['上涨', '下跌'])} {random.uniform(0.5, 5.0):.1f}%，{random.choice(['地缘冲突', '供需变化'])}成主要推手",
-                      f"{TODAY} {random.choice(['美元指数', '欧元兑美元'])} {random.choice(['上涨', '下跌'])} {random.uniform(0.1, 1.0):.2f}，{random.choice(['美联储政策预期', '经济数据'])}主导走势",
-                      f"{TODAY} 北向资金今日{random.choice(['净流入', '净流出'])} {random.randint(1, 100)}亿元，{random.choice(['消费', '科技', '新能源'])}板块获加仓",
-                      f"{TODAY} {random.choice(['美国', '欧元区', '日本'])}公布{random.choice(['CPI', 'PMI', '失业率'])}数据，{random.choice(['好于预期', '不及预期'])}",
-                      f"{TODAY} 国内成品油价格{random.choice(['上调', '下调', '搁浅'])}，92号汽油每升{random.choice(['涨', '降'])}{random.uniform(0.05, 0.3):.2f}元",
-                      f"{TODAY} {random.choice(['中芯国际', '宁德时代', '隆基绿能'])}发布{random.choice(['业绩预告', '扩产计划', '战略合作'])}，影响相关板块走势",
-                      f"{TODAY} 全球粮食价格{random.choice(['上涨', '下跌'])}，{random.choice(['小麦', '玉米', '大豆'])}期货{random.choice(['涨', '跌'])}{random.uniform(0.5, 3.0):.1f}%",
-                      f"{TODAY} {random.choice(['阿里巴巴', '腾讯', '美团'])}发布{random.choice(['季度财报', '新业务规划'])}，中概股{random.choice(['异动', '走强', '走弱'])}"
-                  ]
-                  final_news += fallback_news[:10 - len(final_news)]
-              
-              # 最终格式化（加序号）
-              return [f"{i+1}. {news}" for i, news in enumerate(final_news[:15])]
-
-          def save_news_to_file(news_list):
-              """保存新闻到文件，供主程序调用"""
-              news_file = f"news/global_financial_news_{TODAY.replace('-', '')}.txt"
-              
-              # 写入新闻内容（带分类标题）
-              with open(news_file, 'w', encoding='utf-8') as f:
-                  f.write(f"=== 【影响股市/民生】实时国际财经新闻 ({TODAY}) ===\n")
-                  f.write("🔑 核心影响：货币政策/通胀数据/能源价格/地缘局势/消费就业\n")
-                  f.write("="*50 + "\n")
-                  f.write("\n".join(news_list))
-                  f.write(f"\n\n📊 总计：{len(news_list)} 条核心新闻")
-              
-              print(f"✅ 实时新闻已保存到 {news_file}")
-              print("🔥 今日核心影响新闻预览：")
-              for i, news in enumerate(news_list[:5]):
-                  print(f"   {news}")
-              return news_file
-
-          def main():
-              """主函数：多源抓取+筛选+保存"""
-              print("🚀 开始抓取【影响股市/民生】的实时国际财经新闻...")
-              
-              # 1. 多源抓取
-              sina_news = fetch_sina_finance_news()
-              eastmoney_news = fetch_eastmoney_news()
-              
-              # 2. 合并所有新闻
-              all_news = sina_news + eastmoney_news
-              
-              # 3. 筛选+排序+去重
-              final_news = filter_and_sort_news(all_news)
-              
-              # 4. 保存文件
-              save_news_to_file(final_news)
-              
-              return final_news
-
-          if __name__ == "__main__":
-              # 禁用SSL警告
-              requests.packages.urllib3.disable_warnings()
-              main()
-          EOF
-      
-      - name: 执行股票分析（集成【实时新闻】推送）
+      - name: 执行股票分析
         env:
           # ==========================================
           # AI 配置
@@ -401,212 +159,66 @@ jobs:
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
 
           # ==========================================
-          # 自选股配置（已替换为你指定的601012和000636）
+          # 自选股配置
           # ==========================================
           STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST || '601012,000636' }}
           MARKET_REVIEW_REGION: ${{ vars.MARKET_REVIEW_REGION || secrets.MARKET_REVIEW_REGION || 'cn' }}
           
           # ==========================================
-          # 运行配置 ⬅️ 新增！
+          # 运行配置
           # ==========================================
           REPORT_TYPE: ${{ vars.REPORT_TYPE || secrets.REPORT_TYPE || 'simple' }}
           SINGLE_STOCK_NOTIFY: ${{ vars.SINGLE_STOCK_NOTIFY || secrets.SINGLE_STOCK_NOTIFY || 'false' }}
           MARKET_REVIEW_ENABLED: ${{ vars.MARKET_REVIEW_ENABLED || secrets.MARKET_REVIEW_ENABLED || 'true' }}
           ANALYSIS_DELAY: ${{ vars.ANALYSIS_DELAY || secrets.ANALYSIS_DELAY || '0' }}
           TRADING_DAY_CHECK_ENABLED: ${{ vars.TRADING_DAY_CHECK_ENABLED || secrets.TRADING_DAY_CHECK_ENABLED || 'true' }}
-          # 新闻配置
-          NEWS_ENABLED: ${{ vars.NEWS_ENABLED || secrets.NEWS_ENABLED || 'true' }}
-          NEWS_COUNT: ${{ vars.NEWS_COUNT || secrets.NEWS_COUNT || '15' }}
           
           # ==========================================
           # 系统配置
           # ==========================================
           LOG_LEVEL: INFO
           MAX_WORKERS: ${{ vars.MAX_WORKERS || secrets.MAX_WORKERS || '1' }}
-          # 筹码分布：默认 false（云端接口不稳定）；需启用时在 Settings → Variables 添加 ENABLE_CHIP_DISTRIBUTION=true
           ENABLE_CHIP_DISTRIBUTION: ${{ vars.ENABLE_CHIP_DISTRIBUTION || secrets.ENABLE_CHIP_DISTRIBUTION || 'false' }}
-          # 实时行情数据源优先级（腾讯有量比且稳定，推荐首选）
-          # 可选值: tencent, akshare_sina, efinance, akshare_em, tushare
-          # 如果有 Tushare Pro 高积分账号，可将 tushare 放在首位
           REALTIME_SOURCE_PRIORITY: ${{ vars.REALTIME_SOURCE_PRIORITY || 'tencent,akshare_sina,efinance,akshare_em' }}
           
         run: |
-          # 第一步：运行【真正实时】新闻抓取脚本
-          echo "=========================================="
-          echo "📰 开始抓取【影响股市/民生】的实时国际财经新闻"
-          echo "=========================================="
-          python news_crawler.py
-          
-          # 第二步：处理 LITELLM YAML 配置文件
+          # 处理 LITELLM YAML 配置文件
           if [ -n "$LITELLM_CONFIG_YAML" ] && [ -n "$LITELLM_CONFIG" ]; then
             echo "📝 使用 GitHub Actions Secrets/Variables 中的 LITELLM_CONFIG_YAML 配置"
-            # 确保目录存在
             mkdir -p "$(dirname "$LITELLM_CONFIG")"
-            # 写入配置文件（覆盖已有文件）
             echo "$LITELLM_CONFIG_YAML" > "$LITELLM_CONFIG"
             echo "✅ LITELLM 配置文件已写入: $LITELLM_CONFIG"
           fi
 
-          # 第三步：判断运行模式
+          # 判断运行模式
           MODE="${{ github.event.inputs.mode || 'full' }}"
           
           echo "=========================================="
-          echo "🚀 A股自选股智能分析系统（集成实时新闻推送）"
+          echo "🚀 A股自选股智能分析系统"
           echo "=========================================="
           echo "⏰ 时间: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')"
           echo "🎯 运行模式: $MODE"
           echo "📊 自选股: $STOCK_LIST"
           echo "📝 报告类型: $REPORT_TYPE"
-          echo "📰 新闻数量: $NEWS_COUNT"
           echo ""
-          echo "=========================================="
-          echo "📋 配置检查"
-          echo "=========================================="
-          echo "【AI 配置】"
-          echo "  LiteLLM: $([ -n "$LITELLM_CONFIG" ] || [ -n "$LITELLM_API_KEY" ] || [ -n "$LITELLM_MODEL" ] && echo '✅ 已配置' || echo '❌ 未配置')"
-          echo "  Gemini API Key: $([ -n "$GEMINI_API_KEY" ] && echo '✅ 已配置' || echo '❌ 未配置')"
-          echo "  AIHubMix Key:   $([ -n "$AIHUBMIX_KEY" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
-          echo "  OpenAI API Key: $([ -n "$OPENAI_API_KEY" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
-          echo "  Anthropic Key:  $([ -n "$ANTHROPIC_API_KEY" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
-          echo ""
-          echo "【搜索引擎】"
-          echo "  Bocha API Keys: $([ -n "$BOCHA_API_KEYS" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
-          echo "  Tavily API Keys: $([ -n "$TAVILY_API_KEYS" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
-          echo "  SerpAPI Keys: $([ -n "$SERPAPI_API_KEYS" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
-          echo "  MiniMax API Keys: $([ -n "$MINIMAX_API_KEYS" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
-          echo "  Brave API Keys: $([ -n "$BRAVE_API_KEYS" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
-          echo "  SearXNG Base URLs: $([ -n "$SEARXNG_BASE_URLS" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
-          case "${SEARXNG_PUBLIC_INSTANCES_ENABLED,,}" in
-            0|false|no|off)
-              echo "  SearXNG Public Instances: ❌ 已禁用"
-              ;;
-            "")
-              echo "  SearXNG Public Instances: ✅ 默认开启"
-              ;;
-            *)
-              echo "  SearXNG Public Instances: ✅ 已启用"
-              ;;
-          esac
-          echo ""
-          echo "【通知渠道】"
-          echo "  PushPlus: $([ -n "$PUSHPLUS_TOKEN" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
-          echo "  企业微信: $([ -n "$WECHAT_WEBHOOK_URL" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
-          echo "  飞书: $([ -n "$FEISHU_WEBHOOK_URL" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
-          echo "  Telegram: $([ -n "$TELEGRAM_BOT_TOKEN" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
-          echo "  Discord: $([ -n "$DISCORD_WEBHOOK_URL" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
-          echo "  AstrBot: $([ -n "$ASTRBOT_URL" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
-          echo "  Slack: $(([ -n "$SLACK_WEBHOOK_URL" ] || ([ -n "$SLACK_BOT_TOKEN" ] && [ -n "$SLACK_CHANNEL_ID" ])) && echo '✅ 已配置' || echo '⚪ 未配置')"
-          echo ""
-          echo "【新闻配置】"
-          echo "  实时新闻推送: $([ "$NEWS_ENABLED" = "true" ] && echo '✅ 已启用' || echo '❌ 已禁用')"
-          echo "=========================================="
-          echo ""
-          
-          # 第四步：构建命令行参数
+
+          # 构建命令行参数
           FORCE_RUN_ARG=""
           if [ "${{ github.event.inputs.force_run }}" = "true" ]; then
             FORCE_RUN_ARG="--force-run"
             echo "⚡ 已启用强制运行模式（跳过交易日检查）"
           fi
 
-          # 第五步：执行分析（根据模式）
+          # 执行分析
           if [ "$MODE" = "market-only" ]; then
             python main.py --market-review $FORCE_RUN_ARG
           elif [ "$MODE" = "stocks-only" ]; then
             python main.py --no-market-review $FORCE_RUN_ARG
-          elif [ "$MODE" = "news-only" ]; then
-            # 仅推送【影响股市/民生】的实时新闻
-            echo "📤 仅推送实时国际财经新闻（影响股市/民生）..."
-            TODAY_FILE=$(date +%Y%m%d)
-            NEWS_CONTENT=$(cat news/global_financial_news_$TODAY_FILE.txt)
-            
-            # 推送新闻到飞书（纯文本，自动拆分）
-            if [ -n "$FEISHU_WEBHOOK_URL" ]; then
-              NEWS_LENGTH=${#NEWS_CONTENT}
-              if [ $NEWS_LENGTH -gt 2000 ]; then
-                NEWS_PART1=$(echo "$NEWS_CONTENT" | head -10)
-                curl -X POST $FEISHU_WEBHOOK_URL \
-                  -H "Content-Type: application/json" \
-                  -d '{
-                    "msg_type": "text",
-                    "content": {
-                      "text": "📰【每日核心财经新闻（上）】\n\n'"$NEWS_PART1"'"
-                    }
-                  }'
-                sleep 2
-                NEWS_PART2=$(echo "$NEWS_CONTENT" | tail -n +11)
-                curl -X POST $FEISHU_WEBHOOK_URL \
-                  -H "Content-Type: application/json" \
-                  -d '{
-                    "msg_type": "text",
-                    "content": {
-                      "text": "📰【每日核心财经新闻（下）】\n\n'"$NEWS_PART2"'"
-                    }
-                  }'
-              else
-                curl -X POST $FEISHU_WEBHOOK_URL \
-                  -H "Content-Type: application/json" \
-                  -d '{
-                    "msg_type": "text",
-                    "content": {
-                      "text": "📰【每日核心财经新闻】影响股市/民生\n\n'"$NEWS_CONTENT"'"
-                    }
-                  }'
-              fi
-              echo "✅ 实时财经新闻已推送到飞书"
-            fi
           else
             python main.py $FORCE_RUN_ARG
-            
-            # 拆分推送：大盘 + 个股 + 新闻（解决字数截断）
-            if [ "$NEWS_ENABLED" = "true" ] && [ -n "$FEISHU_WEBHOOK_URL" ]; then
-              TODAY_FILE=$(date +%Y%m%d)
-              NEWS_CONTENT=$(cat news/global_financial_news_$TODAY_FILE.txt)
-              
-              # 1. 大盘复盘
-              if [ -f "reports/report_$TODAY_FILE.md" ]; then
-                MARKET_REVIEW=$(sed -n '/大盘复盘/,/自选股分析/p' reports/report_$TODAY_FILE.md 2>/dev/null | head -200)
-                if [ -n "$MARKET_REVIEW" ]; then
-                  curl -X POST $FEISHU_WEBHOOK_URL \
-                    -H "Content-Type: application/json" \
-                    -d '{
-                      "msg_type": "text",
-                      "content": {
-                        "text": "📊【大盘复盘】\n\n'"$MARKET_REVIEW"'"
-                      }
-                    }'
-                  sleep 2
-                fi
-                
-                # 2. 自选股分析
-                STOCK_ANALYSIS=$(sed -n '/自选股分析/,$p' reports/report_$TODAY_FILE.md 2>/dev/null | head -300)
-                if [ -n "$STOCK_ANALYSIS" ]; then
-                  curl -X POST $FEISHU_WEBHOOK_URL \
-                    -H "Content-Type: application/json" \
-                    -d '{
-                      "msg_type": "text",
-                      "content": {
-                        "text": "📈【自选股分析 601012 / 000636】\n\n'"$STOCK_ANALYSIS"'"
-                      }
-                    }'
-                  sleep 2
-                fi
-              fi
-              
-              # 3. 实时新闻
-              curl -X POST $FEISHU_WEBHOOK_URL \
-                -H "Content-Type: application/json" \
-                -d '{
-                  "msg_type": "text",
-                  "content": {
-                    "text": "📰【实时财经新闻】影响股市&民生\n\n'"$NEWS_CONTENT"'"
-                  }
-                }'
-              echo "✅ 全部内容已拆分推送完成"
-            fi
           fi
       
-      - name: 上传分析报告（含实时新闻）
+      - name: 上传分析报告
         uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -614,7 +226,6 @@ jobs:
           path: |
             reports/
             logs/
-            news/
           retention-days: 30
       
       - name: 显示运行结果
@@ -622,22 +233,13 @@ jobs:
         run: |
           echo ""
           echo "=========================================="
-          echo "📊 分析完成（含【影响股市/民生】的实时新闻）"
+          echo "📊 分析完成"
           echo "=========================================="
           if [ -d "reports" ] && [ "$(ls -A reports 2>/dev/null)" ]; then
             echo "生成的报告:"
             ls -la reports/
           else
             echo "⚠️ 未生成报告文件"
-          fi
-          echo ""
-          if [ -d "news" ] && [ "$(ls -A news" 2>/dev/null)" ]; then
-            echo "生成的实时新闻文件:"
-            ls -la news/
-            echo ""
-            echo "📜 今日核心影响新闻预览（前5条）:"
-            TODAY_FILE=$(date +%Y%m%d)
-            head -10 news/global_financial_news_$TODAY_FILE.txt 2>/dev/null || echo "无新闻文件"
           fi
           echo ""
           if [ -f "logs/stock_analysis_$(date +%Y%m%d).log" ]; then
