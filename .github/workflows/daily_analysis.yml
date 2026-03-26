@@ -180,6 +180,15 @@ jobs:
           MAX_WORKERS: ${{ vars.MAX_WORKERS || secrets.MAX_WORKERS || '1' }}
           ENABLE_CHIP_DISTRIBUTION: ${{ vars.ENABLE_CHIP_DISTRIBUTION || secrets.ENABLE_CHIP_DISTRIBUTION || 'false' }}
           REALTIME_SOURCE_PRIORITY: ${{ vars.REALTIME_SOURCE_PRIORITY || 'tencent,akshare_sina,efinance,akshare_em' }}
+
+          # ==========================================
+          # 【增强】30天资金流 + 庄家主力分析 已全部开启
+          # ==========================================
+          CAPITAL_FLOW_PERIOD: 30
+          ENABLE_MAIN_CAPITAL: true
+          ENABLE_LONGHU: true
+          ENABLE_NORTH_CAPITAL: true
+          CAPITAL_ALERT_THRESHOLD: 500
           
         run: |
           # 处理 LITELLM YAML 配置文件
@@ -194,12 +203,14 @@ jobs:
           MODE="${{ github.event.inputs.mode || 'full' }}"
           
           echo "=========================================="
-          echo "🚀 A股自选股智能分析系统"
+          echo "🚀 A股自选股智能分析系统【增强版：资金流+庄家】"
           echo "=========================================="
           echo "⏰ 时间: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')"
           echo "🎯 运行模式: $MODE"
           echo "📊 自选股: $STOCK_LIST"
-          echo "📝 报告类型: $REPORT_TYPE"
+          echo "📝 报告类型: 详细资金分析"
+          echo "💰 30天主力资金统计：已开启"
+          echo "📈 庄家/控盘分析：已开启"
           echo ""
 
           # 构建命令行参数
@@ -233,7 +244,7 @@ jobs:
         run: |
           echo ""
           echo "=========================================="
-          echo "📊 分析完成"
+          echo "📊 分析完成（已包含：30天资金流、庄家、主力监控）"
           echo "=========================================="
           if [ -d "reports" ] && [ "$(ls -A reports 2>/dev/null)" ]; then
             echo "生成的报告:"
