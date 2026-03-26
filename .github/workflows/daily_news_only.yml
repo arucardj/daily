@@ -18,6 +18,7 @@ jobs:
         env:
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
         run: |
+          python3 -u << 'EOF'
           import requests
           from datetime import datetime, timedelta
           from bs4 import BeautifulSoup
@@ -39,8 +40,8 @@ jobs:
                       "content": {"text": text}
                   }, timeout=20)
                   time.sleep(2)
-              except:
-                  pass
+              except Exception as e:
+                  print(f"发送失败: {e}")
 
           # ================== 第一条：国内新闻 40条 ==================
           domestic = []
@@ -62,7 +63,8 @@ jobs:
                       t = a.get_text(strip=True)
                       if 12 < len(t) < 80 and "视频" not in t:
                           domestic.append(f"{TODAY} {t}（{name}）")
-              except:
+              except Exception as e:
+                  print(f"国内新闻抓取失败: {e}")
                   continue
           domestic = list(dict.fromkeys(domestic))[:40]
           part1 = ["【国内财经新闻 40条】"]
@@ -88,13 +90,15 @@ jobs:
                   soup = BeautifulSoup(r.text, "html.parser")
                   for h in soup.find_all(["h3","h4"]):
                       t = h.get_text(strip=True)
-                      if len(t) < 10: continue
+                      if len(t) < 10:
+                          continue
                       try:
                           cn = translator.translate(t)
                           foreign.append(f"{TODAY} {cn}（{name}）")
-                      except:
+                      except Exception as e:
                           foreign.append(f"{TODAY} {t}（{name}）")
-              except:
+              except Exception as e:
+                  print(f"国际新闻抓取失败: {e}")
                   continue
           foreign = list(dict.fromkeys(foreign))[:40]
           part2 = ["【国际财经新闻 40条（BBC/路透/彭博）】"]
@@ -132,20 +136,21 @@ jobs:
                       rate = round(float(div) / price * 100, 2) if price > 0 else 0
                       high = " 🔥≥5%" if rate >= 5 else ""
                       div_list.append(f"{code} {name} | {tag_type} 分红:{div}元 股息率:{rate}%{high}（巨潮）")
-                  except:
+                  except Exception as e:
                       div_list.append(f"{code} {name} | {tag_type} 分红:{div}元（巨潮）")
 
-              # 重点高股息强制显示
-             重点 = [
+              # 重点高股息强制显示（修复中文变量名）
+              key_stocks = [
                   ("601628", "中国人寿", "【预案】每股0.618元"),
                   ("300750", "宁德时代", "【预案】10派69.57元"),
                   ("601088", "中国神华", "【高股息】长期稳定分红"),
                   ("601318", "中国平安", "【年度分红预案】")
               ]
-              for c, n, d in 重点:
+              for c, n, d in key_stocks:
                   div_list.append(f"{c} {n} | {d}（重点监控）")
 
-          except:
+          except Exception as e:
+              print(f"分红数据抓取失败: {e}")
               div_list = ["数据获取中，不影响行情判断"]
 
           part3.append("一、🔥全阶段分红（预案→实施，≥5%高亮）")
@@ -160,8 +165,10 @@ jobs:
                   s = row["来源"]
                   if any(k in t for k in ["预增", "回购", "增持", "中标", "合同", "获批", "重组"]):
                       good.append(f"【利好】{t}（{s}）")
-                  if len(good) >= 10: break
-          except:
+                  if len(good) >= 10:
+                      break
+          except Exception as e:
+              print(f"利好数据抓取失败: {e}")
               good = ["暂无"]
 
           # 利空
@@ -173,8 +180,10 @@ jobs:
                   s = row["来源"]
                   if any(k in t for k in ["减持", "亏损", "问询", "立案", "风险", "下滑"]):
                       bad.append(f"【利空】{t}（{s}）")
-                  if len(bad) >= 10: break
-          except:
+                  if len(bad) >= 10:
+                      break
+          except Exception as e:
+              print(f"利空数据抓取失败: {e}")
               bad = ["暂无"]
 
           part3.append("\n二、个股利好")
