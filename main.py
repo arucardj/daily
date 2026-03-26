@@ -24,6 +24,9 @@ A股自选股智能分析系统 - 主调度程序
 import os
 from src.config import setup_env
 setup_env()
+import akshare as ak
+import pandas as pd
+import datetime
 
 # 代理配置 - 通过 USE_PROXY 环境变量控制，默认关闭
 # GitHub Actions 环境自动跳过代理配置
@@ -730,3 +733,37 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+# ============================
+# 增强功能：30天资金流 + 庄家主力分析
+# ============================
+def get_capital_flow_30d(stock_code):
+    try:
+        df = ak.stock_individual_capital_flow(symbol=stock_code, period="daily")
+        df = df.tail(30)
+        main_total = df["主力净流入"].sum() / 10000
+        super_total = df["超大单净流入"].sum() / 10000
+        up_days = (df["主力净流入"] > 0).sum()
+        return {
+            "main": round(main_total, 2),
+            "super": round(super_total, 2),
+            "up_days": up_days,
+            "down_days": 30 - up_days
+        }
+    except:
+        return None
+
+def get_zhuangjia_action(stock_code):
+    try:
+        df = ak.stock_individual_capital_flow(symbol=stock_code, period="daily").tail(10)
+        main_mean = df["主力净流入"].mean()
+        chg_mean = df["涨跌幅"].mean()
+        if main_mean > 0 and chg_mean < 0:
+            return "📥 吸筹（庄家悄悄买入）"
+        elif main_mean > 0 and chg_mean > 0:
+            return "🚀 拉升（主力上涨）"
+        elif main_mean < 0 and chg_mean > 0:
+            return "📤 出货（边拉边卖）"
+        else:
+            return "⚪ 震荡"
+    except:
+        return "未知"
