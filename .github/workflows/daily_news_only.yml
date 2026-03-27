@@ -1,10 +1,10 @@
-name: 国内40+国际40·当月分红≥4%·个股利好利空·Gemini评述【全自动飞书推送】
+name: 国内40+国际40·当月分红≥4%·个股利好利空·黄金原油·Gemini评述【低耗稳定版】
 
 on:
   schedule:
-    - cron: '0 0 * * 1-5'   # 北京时间 08:00
-    - cron: '0 4 * * 1-5'   # 北京时间 12:00
-    - cron: '0 10 * * 1-5'  # 北京时间 18:00
+    - cron: '0 0 * * 1-5'   # 8:00
+    - cron: '0 4 * * 1-5'   # 12:00
+    - cron: '0 10 * * 1-5'  # 18:00
   workflow_dispatch:
 
 jobs:
@@ -14,13 +14,13 @@ jobs:
       - name: 安装依赖
         run: pip install requests beautifulsoup4 lxml fake-useragent google-generativeai akshare pandas
 
-      - name: 执行全自动分析推送
+      - name: 执行推送
         env:
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           python3 -u << 'EOF'
-          import requests, time, akshare as ak, pandas as pd, re
+          import requests, time, akshare as ak, pandas as pd
           from datetime import datetime
           from bs4 import BeautifulSoup
           from fake_useragent import UserAgent
@@ -35,9 +35,9 @@ jobs:
           START_DATE = f"{YEAR}-{MONTH:02d}-01"
           headers = {"User-Agent": UserAgent().random}
 
-          # Gemini 初始化
+          # Gemini 初始化（超级稳定）
           genai.configure(api_key=GEMINI_KEY)
-          gemini = genai.GenerativeModel("gemini-2.5-flash")
+          gemini = genai.GenerativeModel("gemini-1.5-flash")
 
           # ================== 飞书发送 ==================
           def send(text):
@@ -45,20 +45,22 @@ jobs:
                   requests.post(WEBHOOK, json={
                       "msg_type": "text",
                       "content": {"text": text[:3072]}
-                  }, timeout=20)
-                  time.sleep(4)
-              except Exception as e:
-                  print("发送失败:", e)
-
-          # ================== Gemini 总结点评 ==================
-          def ai_summary(prompt):
-              try:
-                  res = gemini.generate_content(prompt)
-                  return res.text.strip()
+                  }, timeout=25)
+                  time.sleep(3)
               except:
-                  return "AI 总结暂时不可用"
+                  pass
 
-          # ================== 1. 国内新闻40条（高质量） ==================
+          # ================== AI 总结（只调用 1 次，重试 3 次，超稳） ==================
+          def ai_summary(prompt):
+              for _ in range(3):
+                  try:
+                      res = gemini.generate_content(prompt, request_options={"timeout": 45})
+                      return res.text.strip() if res.text else "AI 暂时不可用"
+                  except:
+                      time.sleep(6)
+              return "⚠️ AI 点评暂时不可用"
+
+          # ================== 1. 国内新闻 ==================
           def domestic_news():
               news = []
               sites = [
@@ -74,15 +76,15 @@ jobs:
                       soup = BeautifulSoup(r.text, "lxml")
                       for a in soup.find_all("a"):
                           t = a.get_text(strip=True)
-                          if 12 < len(t) < 90 and all(x not in t for x in ["视频", "直播", "图片", "下载"]):
+                          if 15 < len(t) < 85 and "视频" not in t and "直播" not in t:
                               news.append(f"【{name}】{t}")
                   except:
                       continue
               return list(dict.fromkeys(news))[:40]
 
-          # ================== 2. 国际新闻40条（翻译准确） ==================
+          # ================== 2. 国际新闻（不逐条翻译！只汇总 1 次 AI） ==================
           def global_news():
-              news = []
+              raw = []
               sites = [
                   ("https://www.reuters.com/business", "路透社"),
                   ("https://www.bbc.com/news/business", "BBC"),
@@ -93,20 +95,15 @@ jobs:
                   try:
                       r = requests.get(url, headers=headers, timeout=10)
                       soup = BeautifulSoup(r.text, "lxml")
-                      for h in soup.find_all(["h2", "h3", "h4"]):
+                      for h in soup.find_all(["h2","h3","h4"]):
                           t = h.get_text(strip=True)
-                          if len(t) < 10 or len(t) > 120:
-                              continue
-                          try:
-                              cn = ai_summary(f"翻译成精准中文，只输出结果：{t}")
-                              news.append(f"【{name}】{cn}")
-                          except:
-                              news.append(f"【{name}】{t}")
+                          if 15 < len(t) < 85:
+                              raw.append(f"【{name}】{t}")
                   except:
                       continue
-              return list(dict.fromkeys(news))[:40]
+              return list(dict.fromkeys(raw))[:40]
 
-          # ================== 3. 当月分红 ≥4%（自然月 1日→今日，官方巨潮数据） ==================
+          # ================== 3. 当月分红 ==================
           def dividends():
               res = []
               try:
@@ -114,111 +111,138 @@ jobs:
                   df["公告日期"] = pd.to_datetime(df["公告日期"], errors="coerce")
                   df = df[df["公告日期"] >= START_DATE]
                   price_df = ak.stock_zh_a_spot_em().set_index("代码")
-
                   for _, row in df.iterrows():
-                      code = row["代码"]
-                      name = row["名称"]
+                      code, name = row["代码"], row["名称"]
                       div = pd.to_numeric(row["每股派息"], errors="coerce")
-
-                      if pd.isna(div) or div <= 0:
-                          continue
-                      if code not in price_df.index:
-                          continue
+                      if pd.isna(div) or div <= 0: continue
+                      if code not in price_df.index: continue
                       p = price_df.loc[code, "最新"]
-                      if p <= 0:
-                          continue
-                      rate = round((div / p) * 100, 2)
-                      if rate >= 4:
-                          tag = "🔥" if rate >=5 else ""
+                      if p <= 0: continue
+                      rate = round((div/p)*100,2)
+                      if rate >=4:
+                          tag = "🔥" if rate>=5 else ""
                           res.append(f"{code} {name} | 派息:{div}元 | 股息率:{rate}%{tag}")
-
               except:
                   pass
               return list(dict.fromkeys(res))[:30]
 
-          # ================== 4. 个股利好利空（精确到股票） ==================
+          # ================== 4. 个股利好利空 ==================
           def stock_news():
-              good = []
-              bad = []
+              good, bad = [], []
               try:
-                  df = ak.stock_news_em(symbol="")
+                  df = ak.stock_news_em("")
                   df["发布时间"] = pd.to_datetime(df["发布时间"], errors="coerce")
-                  df = df[df["发布时间"] >= f"{YEAR}-{MONTH:02d}-01"]
-
+                  df = df[df["发布时间"] >= START_DATE]
                   for _, row in df.iterrows():
-                      code = row["股票代码"]
-                      name = row["股票简称"]
-                      title = row["标题"]
-
-                      if not code or len(code)!=6:
-                          continue
-
-                      if any(x in title for x in ["涨停", "利好", "增长", "中标", "回购", "增持", "获批"]):
+                      code, name, title = row["股票代码"], row["股票简称"], row["标题"]
+                      if not code or len(code)!=6: continue
+                      if any(x in title for x in ["利好","增长","中标","回购","增持","获批"]):
                           good.append(f"{code} {name}｜{title}")
-                      if any(x in title for x in ["跌停", "亏损", "处罚", "立案", "减持", "风险", "暴跌"]):
+                      if any(x in title for x in ["亏损","处罚","立案","减持","风险"]):
                           bad.append(f"{code} {name}｜{title}")
-
               except:
                   pass
-              return good[:20], bad[:20]
+              return good[:15], bad[:15]
 
-          # ================== 主执行 ==================
+          # ================== 5. 黄金 & 原油 ==================
+          def commodity():
+              try:
+                  gold = ak.futures_global_comm(symbol="XAU").iloc[-1]
+                  oil = ak.futures_global_comm(symbol="BZ").iloc[-1]
+                  return {
+                      "gold": round(gold["最新价"],2),
+                      "gold%": round(gold["涨跌幅"],2),
+                      "oil": round(oil["最新价"],2),
+                      "oil%": round(oil["涨跌幅"],2)
+                  }
+              except:
+                  return None
+
+          # ================== 主程序（全程只调用 3 次 AI！） ==================
           if __name__ == "__main__":
-              # 国内新闻
+
+              # 1. 国内新闻
               dom = domestic_news()
-              t1 = [f"📢【国内财经大新闻 40条 {TODAY}】"]
+              t1 = [f"📢 国内财经新闻 40条 {TODAY}"]
               for i, n in enumerate(dom[:40],1):
                   t1.append(f"{i}. {n}")
               send("\n".join(t1))
-
               time.sleep(2)
 
-              # 国际新闻
+              # 2. 国际新闻
               glo = global_news()
-              t2 = [f"🌍【国际财经大新闻 40条 {TODAY}】"]
+              t2 = [f"🌍 国际财经新闻 40条 {TODAY}"]
               for i, n in enumerate(glo[:40],1):
                   t2.append(f"{i}. {n}")
               send("\n".join(t2))
-
               time.sleep(2)
 
-              # AI 总结今日全球市场影响
-              gtext = "\n".join(glo[:15])
-              aicom = ai_summary(f"以下是今日全球财经新闻，请用简短专业的口吻总结：重点、影响、观点、股市可能影响。\n{gtext}")
-              send(f"🤖【Gemini 全球市场今日评述】\n{aicom}")
+              # ========== 【AI 1】全球新闻总结（只调用 1 次） ==========
+              if glo:
+                  summary = ai_summary(f"""
+                  请对以下国际财经新闻做专业总结：
+                  1. 今日核心趋势
+                  2. 对全球股市/商品影响
+                  3. 简短观点
+                  新闻：{"; ".join([g for g in glo[:12]])}
+                  """)
+                  send(f"🤖 Gemini 全球市场点评\n{summary}")
+                  time.sleep(3)
 
-              time.sleep(2)
-
-              # 当月高分红
+              # 3. 当月分红
               divs = dividends()
-              t3 = [f"💰【{YEAR}年{MONTH}月 高股息分红 ≥4%（官方巨潮）】"]
+              t3 = [f"💰 {YEAR}年{MONTH}月 高股息分红 ≥4%"]
               if divs:
-                  for i, item in enumerate(divs,1):
-                      t3.append(f"{i}. {item}")
+                  for i, it in enumerate(divs,1):
+                      t3.append(f"{i}. {it}")
               else:
-                  t3.append("暂无符合条件公告")
+                  t3.append("暂无符合条件")
               send("\n".join(t3))
-
               time.sleep(2)
 
-              # 个股利好利空
+              # 4. 个股利好利空
               good, bad = stock_news()
-              t4 = [f"✅【沪深A股 个股利好（本月）】"]
-              for i, it in enumerate(good[:15],1):
+              t4 = [f"✅ A股个股利好（本月）"]
+              for i, it in enumerate(good[:12],1):
                   t4.append(f"{i}. {it}")
               send("\n".join(t4))
-
               time.sleep(2)
 
-              t5 = [f"⚠️【沪深A股 个股利空（本月）】"]
-              for i, it in enumerate(bad[:15],1):
+              t5 = [f"⚠️ A股个股利空（本月）"]
+              for i, it in enumerate(bad[:12],1):
                   t5.append(f"{i}. {it}")
               send("\n".join(t5))
-
               time.sleep(2)
 
-              # AI 点评个股事件影响
-              gtext2 = "\n".join(good[:8] + bad[:8])
-              aicom2 = ai_summary(f"以下是个股利好利空，请简短点评影响、风险、机会。\n{gtext2}")
-              send(f"🤖【Gemini 个股事件点评】\n{aicom2}")
+              # ========== 【AI 2】个股事件点评（只调用 1 次） ==========
+              if good or bad:
+                  event = ai_summary(f"""
+                  以下是A股个股利好利空，请点评：
+                  1. 整体情绪
+                  2. 机会与风险
+                  3. 哪些类型事件最多
+                  内容：{"; ".join(good[:6] + bad[:6])}
+                  """)
+                  send(f"🤖 Gemini 个股事件点评\n{event}")
+                  time.sleep(3)
+
+              # 5. 黄金 & 原油
+              comm = commodity()
+              if comm:
+                  send(f"🏆 国际商品价格 {TODAY}\" +
+                       f"伦敦金现：{comm['gold']} 美元 | {comm['gold%']}%\n" +
+                       f"布伦特原油：{comm['oil']} 美元 | {comm['oil%']}%")
+                  time.sleep(2)
+
+                  # ========== 【AI 3】黄金原油预判（只调用 1 次） ==========
+                  forecast = ai_summary(f"""
+                  黄金：{comm['gold']} 美元，原油：{comm['oil']} 美元
+                  请分析：
+                  1. 短期走势
+                  2. 驱动因素
+                  3. 预判与建议
+                  控制200字内。
+                  """)
+                  send(f"🤖 Gemini 黄金原油走势预判\n{forecast}")
+
           EOF
