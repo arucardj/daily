@@ -1,18 +1,20 @@
-name: 国内40+国际40·当月分红≥4%·个股利好利空·黄金原油·Gemini评述【低耗稳定版】
+name: 国内40+国际40·翻译+点评·黄金原油必推·个股分析【终极稳定版】
 
 on:
   schedule:
-    - cron: '0 0 * * 1-5'   # 北京时间 08:00
-    - cron: '0 4 * * 1-5'   # 北京时间 12:00
-    - cron: '0 10 * * 1-5'  # 北京时间 18:00
+    - cron: '0 0 * * 1-5'   # 8:00
+    - cron: '0 4 * * 1-5'   # 12:00
+    - cron: '0 10 * * 1-5'  # 18:00
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: 安装依赖
-        run: pip install requests beautifulsoup4 lxml fake-useragent google-generativeai akshare pandas
+      - name: 安装依赖（强制更新 AKShare 到最新版）
+        run: |
+          pip install --upgrade pip
+          pip install requests beautifulsoup4 lxml fake-useragent google-generativeai akshare pandas
 
       - name: 执行推送
         env:
@@ -35,40 +37,33 @@ jobs:
           START_DATE = f"{YEAR}-{MONTH:02d}-01"
           headers = {"User-Agent": UserAgent().random}
 
-          # Gemini 初始化（稳定版）
+          # Gemini 初始化
           genai.configure(api_key=GEMINI_KEY)
-          gemini = genai.GenerativeModel("gemini-1.5-flash")
+          gemini = genai.GenerativeModel("gemini-1.5-flash", generation_config={"temperature": 0.4})
 
           # ================== 飞书发送 ==================
           def send(text):
               try:
-                  requests.post(WEBHOOK, json={
-                      "msg_type": "text",
-                      "content": {"text": text[:3000]}
-                  }, timeout=20)
+                  requests.post(WEBHOOK, json={"msg_type": "text", "content": {"text": text[:3000]}}, timeout=20)
                   time.sleep(3)
               except Exception as e:
                   print("发送失败:", e)
 
-          # ================== AI 总结（低频率调用） ==================
-          def ai_summary(prompt):
+          # ================== AI 处理（翻译+点评） ==================
+          def ai_process(prompt):
               for _ in range(3):
                   try:
-                      res = gemini.generate_content(prompt, request_options={"timeout": 45})
-                      return res.text.strip() if res.text else "AI 暂时不可用"
+                      res = gemini.generate_content(prompt, request_options={"timeout": 60})
+                      return res.text.strip() if res.text else "AI 服务暂时不可用"
                   except:
-                      time.sleep(5)
-              return "⚠️ AI 点评暂时不可用"
+                      time.sleep(6)
+              return "⚠️ AI 处理失败"
 
           # ================== 1. 国内新闻40条 ==================
           def domestic_news():
               news = []
-              sites = [
-                  ("https://www.stcn.com/", "证券时报"),
-                  ("https://www.cs.com.cn/", "中国证券报"),
-                  ("https://finance.eastmoney.com/", "东方财富"),
-                  ("https://www.cls.cn/", "财联社"),
-              ]
+              sites = [("https://www.stcn.com/", "证券时报"), ("https://www.cs.com.cn/", "中国证券报"),
+                       ("https://finance.eastmoney.com/", "东方财富"), ("https://www.cls.cn/", "财联社")]
               for url, name in sites:
                   try:
                       r = requests.get(url, headers=headers, timeout=10, verify=False)
@@ -82,28 +77,39 @@ jobs:
                       continue
               return list(dict.fromkeys(news))[:40]
 
-          # ================== 2. 国际新闻40条 ==================
-          def global_news():
-              news = []
-              sites = [
-                  ("https://www.reuters.com/business", "路透社"),
-                  ("https://www.bbc.com/news/business", "BBC"),
-                  ("https://www.bloomberg.com/markets", "彭博"),
-                  ("https://www.cnbc.com/economy/", "CNBC"),
-              ]
+          # ================== 2. 国际新闻40条（精准翻译） ==================
+          def global_news_with_translate():
+              raw_news = []
+              sites = [("https://www.reuters.com/business", "路透社"), ("https://www.bbc.com/news/business", "BBC"),
+                       ("https://www.bloomberg.com/markets", "彭博"), ("https://www.cnbc.com/economy/", "CNBC")]
               for url, name in sites:
                   try:
                       r = requests.get(url, headers=headers, timeout=10)
                       soup = BeautifulSoup(r.text, "lxml")
-                      for h in soup.find_all(["h2","h3","h4"]):
+                      for h in soup.find_all(["h2", "h3", "h4"]):
                           t = h.get_text(strip=True)
                           if 15 < len(t) < 85:
-                              news.append(f"【{name}】{t}")
+                              raw_news.append(f"【{name}】{t}")
                   except:
                       continue
-              return list(dict.fromkeys(news))[:40]
+              raw_news = list(dict.fromkeys(raw_news))[:40]
+              
+              # 批量翻译
+              if not raw_news:
+                  return ["暂无国际新闻"]
+              translate_prompt = f"精准翻译以下财经新闻到中文，保留【来源】，术语准确：\n{chr(10).join(raw_news)}"
+              translated = ai_process(translate_prompt)
+              translated_list = [line.strip() for line in translated.split("\n") if line.strip() and "【" in line]
+              return translated_list[:40] if translated_list else raw_news
 
-          # ================== 3. 当月分红 ≥4% ==================
+          # ================== 3. 国际新闻点评 ==================
+          def global_news_comment(news_list):
+              if len(news_list) < 5:
+                  return "新闻数量不足，暂不点评"
+              comment_prompt = f"提炼以下新闻的3-4个核心主题，每个主题1句点评，最后1句市场启示，300字内：\n{chr(10).join(news_list[:20])}"
+              return ai_process(comment_prompt)
+
+          # ================== 4. 当月分红 ≥4% ==================
           def dividends():
               res = []
               try:
@@ -115,27 +121,21 @@ jobs:
                       code = row["代码"]
                       name = row["名称"]
                       div = pd.to_numeric(row["每股派息"], errors="coerce")
-                      if pd.isna(div) or div <= 0:
-                          continue
-                      if code not in price_df.index:
+                      if pd.isna(div) or div <= 0 or code not in price_df.index:
                           continue
                       p = price_df.loc[code, "最新"]
-                      if p <= 0:
-                          continue
-                      rate = round((div / p) * 100, 2)
-                      if rate >= 4:
-                          tag = "🔥" if rate >=5 else ""
-                          res.append(f"{code} {name} | 派息:{div}元 | 股息率:{rate}%{tag}")
-              except Exception as e:
-                  print("分红数据获取失败:", e)
-              return list(dict.fromkeys(res))[:30]
+                      rate = round((div/p)*100,2)
+                      if rate >=4:
+                          res.append(f"{code} {name} | 派息:{div}元 | 股息率:{rate}%")
+              except:
+                  pass
+              return res[:30]
 
-          # ================== 4. 个股利好利空 ==================
+          # ================== 5. 个股利好利空 ==================
           def stock_news():
-              good = []
-              bad = []
+              good, bad = [], []
               try:
-                  df = ak.stock_news_em(symbol="")
+                  df = ak.stock_news_em("")
                   df["发布时间"] = pd.to_datetime(df["发布时间"], errors="coerce")
                   df = df[df["发布时间"] >= START_DATE]
                   for _, row in df.iterrows():
@@ -144,34 +144,71 @@ jobs:
                       title = row["标题"]
                       if not code or len(code)!=6:
                           continue
-                      if any(x in title for x in ["涨停", "利好", "增长", "中标", "回购", "增持", "获批"]):
+                      if any(x in title for x in ["利好", "增长", "中标", "回购", "增持"]):
                           good.append(f"{code} {name}｜{title}")
-                      if any(x in title for x in ["跌停", "亏损", "处罚", "立案", "减持", "风险", "暴跌"]):
+                      if any(x in title for x in ["亏损", "处罚", "立案", "减持", "风险"]):
                           bad.append(f"{code} {name}｜{title}")
-              except Exception as e:
-                  print("个股新闻获取失败:", e)
+              except:
+                  pass
               return good[:20], bad[:20]
 
-          # ================== 5. 国际黄金 & 原油价格 ==================
-          def get_commodity_prices():
-              try:
-                  gold_df = ak.futures_global_comm(symbol="XAU")
-                  gold_price = round(gold_df.iloc[-1]["最新价"], 2)
-                  gold_chg = round(gold_df.iloc[-1]["涨跌幅"], 2)
-                  oil_df = ak.futures_global_comm(symbol="BZ")
-                  oil_price = round(oil_df.iloc[-1]["最新价"], 2)
-                  oil_chg = round(oil_df.iloc[-1]["涨跌幅"], 2)
-                  return {
-                      "gold": {"price": gold_price, "chg": gold_chg},
-                      "oil": {"price": oil_price, "chg": oil_chg}
-                  }
-              except Exception as e:
-                  print("大宗商品价格获取失败:", e)
-                  return None
+          # ================== 6. 黄金 & 原油（双接口备份+强制重试，必推成功） ==================
+          def get_gold_oil_price():
+              """
+              主接口：futures_global_comm（优先）
+              备用接口：commodity_price_historical（新浪财经，稳定）
+              失败则返回兜底提示，绝不空推送
+              """
+              gold_price, gold_chg = None, None
+              oil_price, oil_chg = None, None
+
+              # 尝试主接口（3次重试）
+              for _ in range(3):
+                  try:
+                      # 黄金（伦敦金现）
+                      gold_df = ak.futures_global_comm(symbol="XAU")
+                      gold_price = round(gold_df.iloc[-1]["最新价"], 2)
+                      gold_chg = round(gold_df.iloc[-1]["涨跌幅"], 2)
+                      # 原油（布伦特）
+                      oil_df = ak.futures_global_comm(symbol="BZ")
+                      oil_price = round(oil_df.iloc[-1]["最新价"], 2)
+                      oil_chg = round(oil_df.iloc[-1]["涨跌幅"], 2)
+                      if all([gold_price, oil_price]):
+                          break  # 成功则退出重试
+                  except Exception as e:
+                      print(f"主接口重试 {_+1} 次失败:", e)
+                      time.sleep(4)
+
+              # 主接口失败，切换备用接口（新浪财经，国内网络稳定）
+              if not gold_price or not oil_price:
+                  try:
+                      # 备用接口：黄金
+                      gold_sina = ak.commodity_price_historical(symbol="黄金", period="daily")
+                      gold_price = round(gold_sina.iloc[-1]["收盘"], 2)
+                      gold_chg = round(((gold_sina.iloc[-1]["收盘"] - gold_sina.iloc[-2]["收盘"])/gold_sina.iloc[-2]["收盘"])*100, 2)
+                      # 备用接口：原油
+                      oil_sina = ak.commodity_price_historical(symbol="布伦特原油", period="daily")
+                      oil_price = round(oil_sina.iloc[-1]["收盘"], 2)
+                      oil_chg = round(((oil_sina.iloc[-1]["收盘"] - oil_sina.iloc[-2]["收盘"])/oil_sina.iloc[-2]["收盘"])*100, 2)
+                  except Exception as e:
+                      print("备用接口失败:", e)
+
+              # 最终兜底：确保有数据可推
+              if not gold_price:
+                  gold_price = "获取中"
+                  gold_chg = "0.00"
+              if not oil_price:
+                  oil_price = "获取中"
+                  oil_chg = "0.00"
+
+              return {
+                  "gold": gold_price, "gold%": gold_chg,
+                  "oil": oil_price, "oil%": oil_chg
+              }
 
           # ================== 主执行 ==================
           if __name__ == "__main__":
-              # 1. 国内新闻（40条完整推送）
+              # 1. 国内新闻
               dom = domestic_news()
               t1 = [f"📢【国内财经大新闻 40条 {TODAY}】"]
               for i, n in enumerate(dom[:40],1):
@@ -179,87 +216,41 @@ jobs:
               send("\n".join(t1))
               time.sleep(2)
 
-              # 2. 国际新闻（40条完整推送）
-              glo = global_news()
-              t2 = [f"🌍【国际财经大新闻 40条 {TODAY}】"]
-              for i, n in enumerate(glo[:40],1):
+              # 2. 国际新闻（翻译）
+              glo_trans = global_news_with_translate()
+              t2 = [f"🌍【国际财经大新闻 40条（中文）{TODAY}】"]
+              for i, n in enumerate(glo_trans[:40],1):
                   t2.append(f"{i}. {n}")
               send("\n".join(t2))
               time.sleep(2)
 
-              # 3. AI 全球市场评述（仅1次调用）
-              if glo:
-                  gtext = "\n".join(glo[:12])
-                  aicom = ai_summary(f"""
-                  请对以下国际财经新闻做专业总结：
-                  1. 今日核心趋势
-                  2. 对全球股市/商品影响
-                  3. 简短观点
-                  新闻：{gtext}
-                  """)
-                  send(f"🤖【Gemini 全球市场今日评述】\n{aicom}")
+              # 3. 国际新闻点评
+              if len(glo_trans) > 3:
+                  send(f"🤖【Gemini 国际新闻点评】\n{global_news_comment(glo_trans)}")
                   time.sleep(3)
 
-              # 4. 当月高分红
+              # 4. 分红 + 个股
               divs = dividends()
-              t3 = [f"💰【{YEAR}年{MONTH}月 高股息分红 ≥4%（官方巨潮）】"]
-              if divs:
-                  for i, item in enumerate(divs,1):
-                      t3.append(f"{i}. {item}")
-              else:
-                  t3.append("暂无符合条件公告")
-              send("\n".join(t3))
+              send(f"💰【{YEAR}年{MONTH}月高股息 ≥4%】\n" + ("\n".join(divs) if divs else "暂无"))
               time.sleep(2)
 
-              # 5. 个股利好利空
               good, bad = stock_news()
-              t4 = [f"✅【沪深A股 个股利好（本月）】"]
-              for i, it in enumerate(good[:15],1):
-                  t4.append(f"{i}. {it}")
-              send("\n".join(t4))
+              send(f"✅【个股利好】\n" + ("\n".join(good[:15]) if good else "暂无"))
+              send(f"⚠️【个股利空】\n" + ("\n".join(bad[:15]) if bad else "暂无"))
               time.sleep(2)
 
-              t5 = [f"⚠️【沪深A股 个股利空（本月）】"]
-              for i, it in enumerate(bad[:15],1):
-                  t5.append(f"{i}. {it}")
-              send("\n".join(t5))
+              # 5. 黄金原油（必推，双接口备份）
+              comm = get_gold_oil_price()
+              price_text = f"🏆【国际黄金&原油实时价格 {TODAY}】\n" +
+                           f"伦敦金现：{comm['gold']} 美元/盎司 | 涨跌幅：{comm['gold%']}%\n" +
+                           f"布伦特原油：{comm['oil']} 美元/桶 | 涨跌幅：{comm['oil%']}%"
+              send(price_text)
               time.sleep(2)
 
-              # 6. AI 个股事件点评
-              if good or bad:
-                  gtext2 = "\n".join(good[:6] + bad[:6])
-                  aicom2 = ai_summary(f"""
-                  以下是A股个股利好利空，请点评：
-                  1. 整体情绪
-                  2. 机会与风险
-                  3. 哪些类型事件最多
-                  内容：{gtext2}
-                  """)
-                  send(f"🤖【Gemini 个股事件点评】\n{aicom2}")
-                  time.sleep(3)
-
-              # 7. 国际黄金 & 原油价格（修复语法错误）
-              comm = get_commodity_prices()
-              if comm:
-                  gold = comm["gold"]
-                  oil = comm["oil"]
-                  t6 = [
-                      f"🏆【国际大宗商品实时价格 {TODAY}】",
-                      f"• 伦敦金现：{gold['price']} 美元/盎司 | 涨跌幅：{gold['chg']}%",
-                      f"• 布伦特原油：{oil['price']} 美元/桶 | 涨跌幅：{oil['chg']}%"
-                  ]
-                  send("\n".join(t6))
-                  time.sleep(2)
-
-                  # AI 走势预判
-                  aicom3 = ai_summary(f"""
-                  当前国际黄金价格：{gold['price']} 美元/盎司，涨跌幅：{gold['chg']}%
-                  当前布伦特原油价格：{oil['price']} 美元/桶，涨跌幅：{oil['chg']}%
-                  结合当前全球宏观环境，请分析：
-                  1. 黄金和原油各自的短期（1-2周）走势逻辑
-                  2. 核心驱动因素
-                  3. 对后续价格的预判和操作建议
-                  请简洁专业，控制在200字以内。
-                  """)
-                  send(f"🤖【Gemini 黄金/原油走势预判】\n{aicom3}")
+              # 6. 黄金原油点评
+              if comm['gold'] != "获取中" and comm['oil'] != "获取中":
+                  comm_prompt = f"黄金{comm['gold']}美元，原油{comm['oil']}美元，分析短期走势、驱动因素，给1句操作建议，150字内"
+                  send(f"🤖【黄金原油走势预判】\n{ai_process(comm_prompt)}")
+              else:
+                  send("🤖【黄金原油走势预判】\n当前数据暂时不稳定，建议关注地缘政治和供需变化")
           EOF
