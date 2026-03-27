@@ -154,11 +154,6 @@ jobs:
 
           # ================== 6. 黄金 & 原油（双接口备份+强制重试，必推成功） ==================
           def get_gold_oil_price():
-              """
-              主接口：futures_global_comm（优先）
-              备用接口：commodity_price_historical（新浪财经，稳定）
-              失败则返回兜底提示，绝不空推送
-              """
               gold_price, gold_chg = None, None
               oil_price, oil_chg = None, None
 
@@ -239,11 +234,13 @@ jobs:
               send(f"⚠️【个股利空】\n" + ("\n".join(bad[:15]) if bad else "暂无"))
               time.sleep(2)
 
-              # 5. 黄金原油（必推，双接口备份）
+              # 5. 黄金原油（修复语法错误，必推）
               comm = get_gold_oil_price()
-              price_text = f"🏆【国际黄金&原油实时价格 {TODAY}】\n" +
-                           f"伦敦金现：{comm['gold']} 美元/盎司 | 涨跌幅：{comm['gold%']}%\n" +
-                           f"布伦特原油：{comm['oil']} 美元/桶 | 涨跌幅：{comm['oil%']}%"
+              price_text = (
+                  f"🏆【国际黄金&原油实时价格 {TODAY}】\n"
+                  f"伦敦金现：{comm['gold']} 美元/盎司 | 涨跌幅：{comm['gold%']}%\n"
+                  f"布伦特原油：{comm['oil']} 美元/桶 | 涨跌幅：{comm['oil%']}%"
+              )
               send(price_text)
               time.sleep(2)
 
